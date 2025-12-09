@@ -228,6 +228,9 @@ export default function WalletApp() {
       if (walletData) {
         setWallet(walletData);
         setHasCredential(true);
+        // Refresh the stored wallets list
+        const wallets = getStoredWallets();
+        setStoredWallets(wallets);
         setView("wallet");
         setSuccess("Wallet created successfully!");
         setTimeout(() => setSuccess(null), 3000);
@@ -368,6 +371,10 @@ export default function WalletApp() {
     setBalance("0");
     setUsername("");
     setHasCredential(false);
+    // Refresh the stored wallets list
+    const wallets = getStoredWallets();
+    setStoredWallets(wallets);
+    fetchWalletBalances(wallets);
   };
 
   // Recover wallet using discoverable credentials
