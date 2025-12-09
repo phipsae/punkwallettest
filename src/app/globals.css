@@ -243,9 +243,7 @@ input:focus {
 
 /* Punk glow effect */
 .punk-glow {
-  box-shadow: 
-    0 0 20px rgba(255, 20, 147, 0.3),
-    0 0 40px rgba(0, 206, 209, 0.2);
+  box-shadow: 0 0 20px rgba(255, 20, 147, 0.3), 0 0 40px rgba(0, 206, 209, 0.2);
 }
 
 /* Punk button style */
@@ -277,18 +275,27 @@ input:focus {
 
 /* Pixelated border effect */
 .pixel-border {
-  box-shadow: 
-    inset -2px -2px 0 0 rgba(0, 0, 0, 0.3),
+  box-shadow: inset -2px -2px 0 0 rgba(0, 0, 0, 0.3),
     inset 2px 2px 0 0 rgba(255, 255, 255, 0.1);
 }
 
 /* Rainbow border animation */
 @keyframes rainbow-border {
-  0% { border-color: #ff1493; }
-  25% { border-color: #00ced1; }
-  50% { border-color: #639bff; }
-  75% { border-color: #8b5cf6; }
-  100% { border-color: #ff1493; }
+  0% {
+    border-color: #ff1493;
+  }
+  25% {
+    border-color: #00ced1;
+  }
+  50% {
+    border-color: #639bff;
+  }
+  75% {
+    border-color: #8b5cf6;
+  }
+  100% {
+    border-color: #ff1493;
+  }
 }
 
 .rainbow-border {

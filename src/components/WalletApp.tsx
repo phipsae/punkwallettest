@@ -56,7 +56,8 @@ type View =
   | "receive"
   | "connect"
   | "sessions"
-  | "tokens";
+  | "tokens"
+  | "export";
 
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
@@ -101,6 +102,10 @@ export default function WalletApp() {
     null
   );
   const [wcInitialized, setWcInitialized] = useState(false);
+
+  // Export private key state
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [exportConfirmed, setExportConfirmed] = useState(false);
 
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
@@ -522,13 +527,25 @@ export default function WalletApp() {
     setTimeout(() => setSuccess(null), 2000);
   };
 
+  const copyPrivateKey = async () => {
+    if (!wallet) return;
+    await navigator.clipboard.writeText(wallet.privateKey);
+    setSuccess("Private key copied to clipboard!");
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
   // Show loading state until mounted to prevent hydration mismatch
   if (!mounted) {
     return (
       <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
         <div className="flex flex-col items-center gap-4 animate-pulse-glow">
           <div className="punk-loader">
-            <svg width="80" height="80" viewBox="0 0 24 24" className="punk-icon">
+            <svg
+              width="80"
+              height="80"
+              viewBox="0 0 24 24"
+              className="punk-icon"
+            >
               <rect width="24" height="24" fill="#639bff" rx="3" />
               {/* Simple punk face */}
               <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
@@ -556,7 +573,12 @@ export default function WalletApp() {
           {/* Logo with Punk */}
           <div className="text-center space-y-4">
             <div className="inline-block glow animate-pulse-glow rounded-2xl overflow-hidden">
-              <svg width="96" height="96" viewBox="0 0 24 24" className="punk-logo">
+              <svg
+                width="96"
+                height="96"
+                viewBox="0 0 24 24"
+                className="punk-logo"
+              >
                 <rect width="24" height="24" fill="#639bff" rx="3" />
                 {/* Punk face */}
                 <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
@@ -578,7 +600,10 @@ export default function WalletApp() {
               </svg>
             </div>
             <h1 className="text-4xl font-bold tracking-tight">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500">Punk</span> Wallet
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500">
+                Punk
+              </span>{" "}
+              Wallet
             </h1>
             <p className="text-foreground/60 text-lg">
               Self-custodial Ethereum wallet secured by passkeys
@@ -886,7 +911,10 @@ export default function WalletApp() {
               </svg>
             </div>
             <span className="font-bold text-lg">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">Punk</span> Wallet
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">
+                Punk
+              </span>{" "}
+              Wallet
             </span>
           </div>
 
@@ -902,6 +930,30 @@ export default function WalletApp() {
                 </option>
               ))}
             </select>
+
+            <button
+              onClick={() => {
+                setView("export");
+                setShowPrivateKey(false);
+                setExportConfirmed(false);
+              }}
+              className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              title="Export private key"
+            >
+              <svg
+                className="w-5 h-5 text-foreground/60"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                />
+              </svg>
+            </button>
 
             <button
               onClick={handleReset}
@@ -954,10 +1006,24 @@ export default function WalletApp() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <PunkAvatar address={wallet.address} size={64} className="glow-sm" />
+                  <PunkAvatar
+                    address={wallet.address}
+                    size={64}
+                    className="glow-sm"
+                  />
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-success border-2 border-card-bg flex items-center justify-center">
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-3 h-3 text-white"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   </div>
                 </div>
@@ -1394,9 +1460,13 @@ export default function WalletApp() {
             <div className="text-center space-y-6 py-4">
               {/* Punk Avatar */}
               <div className="flex justify-center">
-                <PunkAvatar address={wallet.address} size={80} className="glow" />
+                <PunkAvatar
+                  address={wallet.address}
+                  size={80}
+                  className="glow"
+                />
               </div>
-              
+
               {/* QR Code */}
               <div className="inline-flex items-center justify-center bg-white rounded-2xl p-4 mx-auto relative">
                 <QRCodeSVG
@@ -1447,6 +1517,248 @@ export default function WalletApp() {
                 {network.charAt(0).toUpperCase() + network.slice(1)}
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Export Private Key View */}
+        {view === "export" && wallet && (
+          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Export Private Key</h2>
+              <button
+                onClick={() => {
+                  setView("wallet");
+                  setShowPrivateKey(false);
+                  setExportConfirmed(false);
+                }}
+                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {!exportConfirmed ? (
+              <div className="space-y-6">
+                {/* Warning Box */}
+                <div className="p-4 rounded-xl bg-error/10 border border-error/30">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-error/20 flex items-center justify-center">
+                      <svg
+                        className="w-6 h-6 text-error"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-error">
+                        Security Warning
+                      </h3>
+                      <ul className="text-sm text-foreground/70 space-y-1 list-disc list-inside">
+                        <li>
+                          Your private key grants full access to your wallet
+                        </li>
+                        <li>Anyone with this key can steal all your funds</li>
+                        <li>
+                          Never share it with anyone or enter it on websites
+                        </li>
+                        <li>
+                          Store it securely offline if you must back it up
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Wallet info */}
+                <div className="flex items-center gap-4 p-4 rounded-xl bg-input-bg border border-card-border">
+                  <PunkAvatar address={wallet.address} size={48} />
+                  <div>
+                    <div className="font-medium">
+                      {wallet.credential.username || "Wallet"}
+                    </div>
+                    <div className="text-sm text-foreground/50 font-mono">
+                      {formatAddress(wallet.address)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Confirmation checkbox */}
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={exportConfirmed}
+                    onChange={(e) => setExportConfirmed(e.target.checked)}
+                    className="mt-1 w-5 h-5 rounded border-card-border bg-input-bg accent-accent cursor-pointer"
+                  />
+                  <span className="text-sm text-foreground/70">
+                    I understand the risks and take full responsibility for
+                    keeping my private key secure
+                  </span>
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Private Key Display */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-foreground/60">
+                      Private Key
+                    </label>
+                    <button
+                      onClick={() => setShowPrivateKey(!showPrivateKey)}
+                      className="text-sm text-accent-light hover:text-accent transition-colors flex items-center gap-1"
+                    >
+                      {showPrivateKey ? (
+                        <>
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                            />
+                          </svg>
+                          Hide
+                        </>
+                      ) : (
+                        <>
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                            />
+                          </svg>
+                          Reveal
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <div className="bg-input-bg border border-card-border rounded-xl p-4 pr-12">
+                      <code className="font-mono text-sm break-all select-all">
+                        {showPrivateKey
+                          ? wallet.privateKey
+                          : "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"}
+                      </code>
+                    </div>
+                    {showPrivateKey && (
+                      <button
+                        onClick={copyPrivateKey}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                        title="Copy private key"
+                      >
+                        <svg
+                          className="w-5 h-5 text-foreground/60"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                          />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Warning reminder */}
+                <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 flex items-center gap-2">
+                  <svg
+                    className="w-5 h-5 text-warning flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                  <span className="text-xs text-foreground/60">
+                    Never paste this key into websites or share it with anyone
+                  </span>
+                </div>
+
+                {/* Copy button */}
+                {showPrivateKey && (
+                  <button
+                    onClick={copyPrivateKey}
+                    className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 transition-all duration-200 font-semibold text-white flex items-center justify-center gap-2"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                    Copy Private Key
+                  </button>
+                )}
+
+                {/* Back to safety */}
+                <button
+                  onClick={() => {
+                    setShowPrivateKey(false);
+                    setExportConfirmed(false);
+                  }}
+                  className="w-full py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-medium"
+                >
+                  Hide & Go Back
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1902,7 +2214,9 @@ export default function WalletApp() {
         <div className="bg-card-bg/50 border border-card-border rounded-xl p-4 text-center text-sm text-foreground/40">
           <p className="flex items-center justify-center gap-2">
             <span className="text-punk-pink">🤘</span>
-            <span>Your keys are secured by passkeys and never leave your device</span>
+            <span>
+              Your keys are secured by passkeys and never leave your device
+            </span>
             <span className="text-punk-cyan">🤘</span>
           </p>
         </div>
@@ -1910,7 +2224,8 @@ export default function WalletApp() {
         {/* Punk Gallery Footer */}
         <div className="py-4 text-center">
           <p className="text-xs text-foreground/30">
-            Powered by <span className="text-punk-pink">EIP-7951</span> secp256r1 verification
+            Powered by <span className="text-punk-pink">EIP-7951</span>{" "}
+            secp256r1 verification
           </p>
         </div>
       </main>
