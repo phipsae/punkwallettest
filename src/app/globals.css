@@ -36,6 +36,22 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
+/* iOS Safe Area support for notch/Dynamic Island */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-all {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 /* Animated gradient background */
 .gradient-bg {
   background: linear-gradient(

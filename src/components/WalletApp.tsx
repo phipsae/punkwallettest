@@ -23,6 +23,17 @@ import {
   NETWORKS,
 } from "@/lib/wallet";
 import {
+  getAllTokenBalances,
+  sendToken,
+  getTokenInfo,
+  addCustomToken,
+  removeCustomToken,
+  getTokensForNetwork,
+  formatTokenAmount,
+  type Token,
+  type TokenBalance,
+} from "@/lib/tokens";
+import {
   initWalletConnect,
   setEventCallbacks,
   connectWithUri,
@@ -43,7 +54,8 @@ type View =
   | "send"
   | "receive"
   | "connect"
-  | "sessions";
+  | "sessions"
+  | "tokens";
 
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
@@ -69,6 +81,14 @@ export default function WalletApp() {
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [selectedToken, setSelectedToken] = useState<Token | null>(null); // null = ETH
+
+  // Token state
+  const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
+  const [showAddToken, setShowAddToken] = useState(false);
+  const [customTokenAddress, setCustomTokenAddress] = useState("");
+  const [addingToken, setAddingToken] = useState(false);
 
   // WalletConnect state
   const [wcUri, setWcUri] = useState("");
@@ -166,13 +186,31 @@ export default function WalletApp() {
     }
   }, [wallet, network]);
 
+  // Fetch token balances
+  const fetchTokenBalances = useCallback(async () => {
+    if (!wallet) return;
+    setLoadingTokens(true);
+    try {
+      const balances = await getAllTokenBalances(wallet.address, network);
+      setTokenBalances(balances);
+    } catch (err) {
+      console.error("Failed to fetch token balances:", err);
+    } finally {
+      setLoadingTokens(false);
+    }
+  }, [wallet, network]);
+
   useEffect(() => {
     if (wallet) {
       fetchBalance();
-      const interval = setInterval(fetchBalance, 15000); // Refresh every 15s
+      fetchTokenBalances();
+      const interval = setInterval(() => {
+        fetchBalance();
+        fetchTokenBalances();
+      }, 15000); // Refresh every 15s
       return () => clearInterval(interval);
     }
-  }, [wallet, network, fetchBalance]);
+  }, [wallet, network, fetchBalance, fetchTokenBalances]);
 
   // Create new wallet
   const handleCreateWallet = async () => {
@@ -221,7 +259,7 @@ export default function WalletApp() {
     }
   };
 
-  // Send ETH
+  // Send ETH or Token
   const handleSend = async () => {
     if (!wallet) return;
 
@@ -239,19 +277,35 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const result = await sendETH(
-        wallet.privateKey,
-        sendTo as `0x${string}`,
-        sendAmount,
-        network
-      );
+      let result;
+
+      if (selectedToken) {
+        // Send ERC20 token
+        result = await sendToken(
+          wallet.privateKey,
+          selectedToken,
+          sendTo as `0x${string}`,
+          sendAmount,
+          network
+        );
+      } else {
+        // Send ETH
+        result = await sendETH(
+          wallet.privateKey,
+          sendTo as `0x${string}`,
+          sendAmount,
+          network
+        );
+      }
 
       if (result.success) {
         setTxHash(result.hash);
-        setSuccess("Transaction sent successfully!");
+        setSuccess(`${selectedToken ? selectedToken.symbol : 'ETH'} sent successfully!`);
         setSendTo("");
         setSendAmount("");
+        setSelectedToken(null);
         fetchBalance();
+        fetchTokenBalances();
       } else {
         setError(result.error || "Transaction failed");
       }
@@ -260,6 +314,43 @@ export default function WalletApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Add custom token
+  const handleAddCustomToken = async () => {
+    if (!customTokenAddress || !isValidAddress(customTokenAddress)) {
+      setError("Invalid token address");
+      return;
+    }
+
+    setAddingToken(true);
+    setError(null);
+
+    try {
+      const tokenInfo = await getTokenInfo(customTokenAddress as `0x${string}`, network);
+      if (tokenInfo) {
+        addCustomToken(network, tokenInfo);
+        setCustomTokenAddress("");
+        setShowAddToken(false);
+        setSuccess(`Added ${tokenInfo.symbol} to your token list!`);
+        setTimeout(() => setSuccess(null), 3000);
+        fetchTokenBalances();
+      } else {
+        setError("Could not find token information. Make sure the address is correct.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add token");
+    } finally {
+      setAddingToken(false);
+    }
+  };
+
+  // Remove custom token
+  const handleRemoveToken = (tokenAddress: string) => {
+    removeCustomToken(network, tokenAddress);
+    fetchTokenBalances();
+    setSuccess("Token removed from list");
+    setTimeout(() => setSuccess(null), 2000);
   };
 
   // Reset wallet
@@ -426,7 +517,7 @@ export default function WalletApp() {
   // Show loading state until mounted to prevent hydration mismatch
   if (!mounted) {
     return (
-      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4">
+      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
         <div className="w-20 h-20 rounded-2xl bg-accent/20 glow animate-pulse-glow flex items-center justify-center">
           <svg
             className="w-10 h-10 text-accent-light"
@@ -449,7 +540,7 @@ export default function WalletApp() {
   // Render onboarding view
   if (view === "onboarding") {
     return (
-      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4">
+      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
           {/* Logo */}
           <div className="text-center space-y-4">
@@ -754,9 +845,9 @@ export default function WalletApp() {
 
   // Render wallet view
   return (
-    <div className="min-h-screen gradient-bg cyber-grid">
+    <div className="min-h-screen gradient-bg cyber-grid safe-area-all">
       {/* Header */}
-      <header className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center">
@@ -974,6 +1065,73 @@ export default function WalletApp() {
                 </span>
               )}
             </button>
+
+            {/* Token Balances Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-foreground/60">Tokens</h3>
+                <button
+                  onClick={() => setView("tokens")}
+                  className="text-xs text-accent-light hover:text-accent transition-colors"
+                >
+                  Manage Tokens
+                </button>
+              </div>
+
+              {loadingTokens ? (
+                <div className="text-center py-4 text-foreground/40 text-sm">
+                  Loading tokens...
+                </div>
+              ) : tokenBalances.length === 0 ? (
+                <div className="text-center py-4 text-foreground/40 text-sm">
+                  No tokens found
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {tokenBalances
+                    .filter((tb) => parseFloat(tb.balance) > 0)
+                    .map((tb) => (
+                      <div
+                        key={tb.token.address}
+                        className="flex items-center justify-between p-3 rounded-xl bg-input-bg border border-card-border hover:border-accent/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          {tb.token.logoURI ? (
+                            <img
+                              src={tb.token.logoURI}
+                              alt={tb.token.symbol}
+                              className="w-8 h-8 rounded-full"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
+                              <span className="text-xs font-bold text-accent-light">
+                                {tb.token.symbol.slice(0, 2)}
+                              </span>
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-medium">{tb.token.symbol}</div>
+                            <div className="text-xs text-foreground/40">{tb.token.name}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold tabular-nums">
+                            {formatTokenAmount(tb.balance)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {tokenBalances.filter((tb) => parseFloat(tb.balance) > 0).length === 0 && (
+                    <div className="text-center py-4 text-foreground/40 text-sm">
+                      No token balances
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -981,12 +1139,15 @@ export default function WalletApp() {
         {view === "send" && wallet && (
           <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Send ETH</h2>
+              <h2 className="text-xl font-semibold">
+                Send {selectedToken ? selectedToken.symbol : "ETH"}
+              </h2>
               <button
                 onClick={() => {
                   setView("wallet");
                   setTxHash(null);
                   setError(null);
+                  setSelectedToken(null);
                 }}
                 className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
               >
@@ -1035,6 +1196,66 @@ export default function WalletApp() {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Token Selection */}
+                <div>
+                  <label className="block text-sm text-foreground/60 mb-2">
+                    Asset
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    <button
+                      onClick={() => setSelectedToken(null)}
+                      className={`p-3 rounded-xl border transition-all ${
+                        selectedToken === null
+                          ? "bg-accent/20 border-accent"
+                          : "bg-input-bg border-card-border hover:border-accent/50"
+                      }`}
+                    >
+                      <div className="text-center">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center mx-auto mb-1">
+                          <span className="text-xs font-bold">Ξ</span>
+                        </div>
+                        <div className="text-xs font-medium">ETH</div>
+                      </div>
+                    </button>
+                    {tokenBalances
+                      .filter((tb) => parseFloat(tb.balance) > 0)
+                      .slice(0, 7)
+                      .map((tb) => (
+                        <button
+                          key={tb.token.address}
+                          onClick={() => setSelectedToken(tb.token)}
+                          className={`p-3 rounded-xl border transition-all ${
+                            selectedToken?.address === tb.token.address
+                              ? "bg-accent/20 border-accent"
+                              : "bg-input-bg border-card-border hover:border-accent/50"
+                          }`}
+                        >
+                          <div className="text-center">
+                            {tb.token.logoURI ? (
+                              <img
+                                src={tb.token.logoURI}
+                                alt={tb.token.symbol}
+                                className="w-8 h-8 rounded-full mx-auto mb-1"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-1">
+                                <span className="text-xs font-bold">
+                                  {tb.token.symbol.slice(0, 2)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="text-xs font-medium truncate">
+                              {tb.token.symbol}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm text-foreground/60 mb-2">
                     Recipient Address
@@ -1050,7 +1271,7 @@ export default function WalletApp() {
 
                 <div>
                   <label className="block text-sm text-foreground/60 mb-2">
-                    Amount (ETH)
+                    Amount ({selectedToken ? selectedToken.symbol : "ETH"})
                   </label>
                   <div className="relative">
                     <input
@@ -1063,14 +1284,31 @@ export default function WalletApp() {
                       className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 pr-16"
                     />
                     <button
-                      onClick={() => setAmount(balance)}
+                      onClick={() => {
+                        if (selectedToken) {
+                          const tokenBal = tokenBalances.find(
+                            (tb) => tb.token.address === selectedToken.address
+                          );
+                          if (tokenBal) setSendAmount(tokenBal.balance);
+                        } else {
+                          setAmount(balance);
+                        }
+                      }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-accent-light hover:text-accent"
                     >
                       MAX
                     </button>
                   </div>
                   <p className="text-sm text-foreground/40 mt-2">
-                    Balance: {parseFloat(balance).toFixed(6)} ETH
+                    Balance:{" "}
+                    {selectedToken
+                      ? formatTokenAmount(
+                          tokenBalances.find(
+                            (tb) => tb.token.address === selectedToken.address
+                          )?.balance || "0"
+                        )
+                      : parseFloat(balance).toFixed(6)}{" "}
+                    {selectedToken ? selectedToken.symbol : "ETH"}
                   </p>
                 </div>
 
@@ -1100,7 +1338,7 @@ export default function WalletApp() {
                       Signing & Sending...
                     </span>
                   ) : (
-                    "Send ETH"
+                    `Send ${selectedToken ? selectedToken.symbol : "ETH"}`
                   )}
                 </button>
               </div>
@@ -1309,6 +1547,209 @@ export default function WalletApp() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Tokens Management View */}
+        {view === "tokens" && wallet && (
+          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Manage Tokens</h2>
+              <button
+                onClick={() => {
+                  setView("wallet");
+                  setShowAddToken(false);
+                }}
+                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {/* Add Custom Token Section */}
+            {showAddToken ? (
+              <div className="space-y-4 p-4 rounded-xl bg-input-bg border border-card-border">
+                <h3 className="font-medium">Add Custom Token</h3>
+                <div>
+                  <label className="block text-sm text-foreground/60 mb-2">
+                    Token Contract Address
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="0x..."
+                    value={customTokenAddress}
+                    onChange={(e) => setCustomTokenAddress(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-card-bg border border-card-border text-foreground placeholder-foreground/40 font-mono text-sm"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowAddToken(false);
+                      setCustomTokenAddress("");
+                    }}
+                    className="flex-1 py-3 px-4 rounded-xl bg-card-border hover:bg-card-border/80 transition-all font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddCustomToken}
+                    disabled={addingToken || !customTokenAddress}
+                    className="flex-1 py-3 px-4 rounded-xl bg-accent hover:bg-accent-dark transition-all font-medium text-white disabled:opacity-50"
+                  >
+                    {addingToken ? "Adding..." : "Add Token"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAddToken(true)}
+                className="w-full py-3 px-4 rounded-xl border border-dashed border-card-border hover:border-accent/50 transition-all text-foreground/60 hover:text-foreground flex items-center justify-center gap-2"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                  />
+                </svg>
+                Add Custom Token
+              </button>
+            )}
+
+            {/* Token List */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-foreground/60">
+                All Tokens on {network.charAt(0).toUpperCase() + network.slice(1)}
+              </h3>
+
+              {loadingTokens ? (
+                <div className="text-center py-8 text-foreground/40">
+                  Loading tokens...
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {tokenBalances.map((tb) => {
+                    const isCustom = !getTokensForNetwork(network)
+                      .slice(0, 10)
+                      .some(
+                        (t) =>
+                          t.address.toLowerCase() ===
+                          tb.token.address.toLowerCase()
+                      );
+                    return (
+                      <div
+                        key={tb.token.address}
+                        className="flex items-center justify-between p-4 rounded-xl bg-input-bg border border-card-border"
+                      >
+                        <div className="flex items-center gap-3">
+                          {tb.token.logoURI ? (
+                            <img
+                              src={tb.token.logoURI}
+                              alt={tb.token.symbol}
+                              className="w-10 h-10 rounded-full"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display =
+                                  "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
+                              <span className="text-sm font-bold text-accent-light">
+                                {tb.token.symbol.slice(0, 2)}
+                              </span>
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-medium flex items-center gap-2">
+                              {tb.token.symbol}
+                              {isCustom && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent-light">
+                                  Custom
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-foreground/40">
+                              {tb.token.name}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="font-semibold tabular-nums">
+                              {formatTokenAmount(tb.balance)}
+                            </div>
+                            <div className="text-xs text-foreground/40 font-mono">
+                              {tb.token.address.slice(0, 6)}...
+                              {tb.token.address.slice(-4)}
+                            </div>
+                          </div>
+                          {isCustom && (
+                            <button
+                              onClick={() => handleRemoveToken(tb.token.address)}
+                              className="p-2 rounded-lg hover:bg-error/20 text-error/60 hover:text-error transition-colors"
+                              title="Remove token"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => fetchTokenBalances()}
+              className="w-full py-3 px-4 rounded-xl bg-card-border hover:bg-card-border/80 transition-all font-medium flex items-center justify-center gap-2"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              Refresh Balances
+            </button>
           </div>
         )}
 

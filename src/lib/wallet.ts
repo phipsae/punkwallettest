@@ -22,12 +22,15 @@ export const NETWORKS: Record<string, Chain> = {
 // Default to Sepolia for testing
 const DEFAULT_NETWORK = "sepolia";
 
+// Alchemy API Key from environment
+const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
+
 // RPC URLs - using Alchemy endpoints
 const RPC_URLS: Record<string, string> = {
-  mainnet: "https://eth-mainnet.g.alchemy.com/v2/45xSAq2QgtdWDKdRvmR3s",
-  sepolia: "https://eth-sepolia.g.alchemy.com/v2/45xSAq2QgtdWDKdRvmR3s",
-  arbitrum: "https://arb-mainnet.g.alchemy.com/v2/45xSAq2QgtdWDKdRvmR3s",
-  base: "https://base-mainnet.g.alchemy.com/v2/45xSAq2QgtdWDKdRvmR3s",
+  mainnet: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  sepolia: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
 
 export interface WalletState {

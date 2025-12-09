@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
     "@noble/hashes": "^2.0.1",
     "@reown/walletkit": "^1.4.1",
     "@simplewebauthn/browser": "^13.2.2",

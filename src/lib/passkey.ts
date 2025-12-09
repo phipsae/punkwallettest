@@ -31,6 +31,24 @@ export interface PasskeyWallet {
 const CREDENTIAL_STORAGE_KEY = "punk_wallet_credential";
 const WALLETS_LIST_KEY = "punk_wallet_list";
 
+// Passkey RP (Relying Party) configuration
+// This MUST match the domain in your apple-app-site-association file
+// Set NEXT_PUBLIC_PASSKEY_RP_ID in your .env.local or Vercel environment
+function getPasskeyRpId(): string {
+  // Use environment variable if set (for production)
+  if (
+    typeof process !== "undefined" &&
+    process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
+  ) {
+    return process.env.NEXT_PUBLIC_PASSKEY_RP_ID;
+  }
+  // Fallback to current hostname (for local development)
+  if (typeof window !== "undefined") {
+    return window.location.hostname;
+  }
+  return "localhost";
+}
+
 // Generate a random challenge
 function generateChallenge(): Uint8Array {
   const challenge = new Uint8Array(32);
@@ -116,7 +134,7 @@ export async function registerPasskey(
       challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
       rp: {
         name: "Punk Wallet",
-        id: window.location.hostname,
+        id: getPasskeyRpId(),
       },
       user: {
         id: bufferToBase64url(
@@ -197,7 +215,7 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
     await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
-        rpId: window.location.hostname,
+        rpId: getPasskeyRpId(),
         allowCredentials: [
           {
             id: credentialIdBase64url,
@@ -235,7 +253,7 @@ export async function recoverWallet(): Promise<PasskeyWallet | null> {
     const authResponse = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
-        rpId: window.location.hostname,
+        rpId: getPasskeyRpId(),
         userVerification: "required",
         timeout: 60000,
         // No allowCredentials = discoverable credential mode
@@ -300,7 +318,7 @@ export async function authenticateWithWallet(
     await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
-        rpId: window.location.hostname,
+        rpId: getPasskeyRpId(),
         allowCredentials: [
           {
             id: storedWallet.credentialId,

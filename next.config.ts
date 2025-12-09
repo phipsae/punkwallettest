@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Static export for Capacitor iOS/Android builds
+  output: 'export',
+
   // Empty turbopack config to satisfy Next.js 16 requirement
   turbopack: {},
 
