@@ -300,7 +300,9 @@ export default function WalletApp() {
 
       if (result.success) {
         setTxHash(result.hash);
-        setSuccess(`${selectedToken ? selectedToken.symbol : 'ETH'} sent successfully!`);
+        setSuccess(
+          `${selectedToken ? selectedToken.symbol : "ETH"} sent successfully!`
+        );
         setSendTo("");
         setSendAmount("");
         setSelectedToken(null);
@@ -327,7 +329,10 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const tokenInfo = await getTokenInfo(customTokenAddress as `0x${string}`, network);
+      const tokenInfo = await getTokenInfo(
+        customTokenAddress as `0x${string}`,
+        network
+      );
       if (tokenInfo) {
         addCustomToken(network, tokenInfo);
         setCustomTokenAddress("");
@@ -336,7 +341,9 @@ export default function WalletApp() {
         setTimeout(() => setSuccess(null), 3000);
         fetchTokenBalances();
       } else {
-        setError("Could not find token information. Make sure the address is correct.");
+        setError(
+          "Could not find token information. Make sure the address is correct."
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add token");
@@ -632,78 +639,14 @@ export default function WalletApp() {
               </>
             ) : (
               <>
-                <div className="text-center space-y-2">
-                  <h2 className="text-xl font-semibold">Create your wallet</h2>
-                  <p className="text-foreground/60">
-                    Your wallet will be secured with a passkey
-                  </p>
-                </div>
-
-                <input
-                  type="text"
-                  placeholder="Enter a username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 focus:border-accent transition-colors"
-                />
-
-                <button
-                  onClick={handleCreateWallet}
-                  disabled={loading}
-                  className="w-full py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow disabled:opacity-50"
-                >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                          fill="none"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                      Creating...
-                    </span>
-                  ) : (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                        />
-                      </svg>
-                      Create Wallet
-                    </span>
-                  )}
-                </button>
-
-                {/* Existing Wallets Section */}
+                {/* Existing Wallets Section - Show first if there are wallets */}
                 {storedWallets.length > 0 && (
                   <>
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-card-border"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-4 bg-card-bg text-foreground/40">
-                          or select existing wallet
-                        </span>
-                      </div>
+                    <div className="text-center space-y-2">
+                      <h2 className="text-xl font-semibold">Your Wallets</h2>
+                      <p className="text-foreground/60">
+                        Select a wallet to unlock
+                      </p>
                     </div>
 
                     <div className="space-y-2">
@@ -782,47 +725,119 @@ export default function WalletApp() {
                         </button>
                       ))}
                     </div>
-                  </>
-                )}
 
-                {/* Recover from device passkeys (if no stored wallets) */}
-                {storedWallets.length === 0 && (
-                  <>
                     <div className="relative">
                       <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-card-border"></div>
                       </div>
                       <div className="relative flex justify-center text-sm">
                         <span className="px-4 bg-card-bg text-foreground/40">
-                          or
+                          or create a new wallet
                         </span>
                       </div>
                     </div>
-
-                    <button
-                      onClick={handleRecoverWallet}
-                      disabled={loading}
-                      className="w-full py-4 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold disabled:opacity-50"
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                          />
-                        </svg>
-                        Recover from Passkey
-                      </span>
-                    </button>
                   </>
                 )}
+
+                {/* Create wallet section - Show header only if no existing wallets */}
+                {storedWallets.length === 0 && (
+                  <div className="text-center space-y-2">
+                    <h2 className="text-xl font-semibold">
+                      Create your wallet
+                    </h2>
+                    <p className="text-foreground/60">
+                      Your wallet will be secured with a passkey
+                    </p>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  placeholder="Enter a username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 focus:border-accent transition-colors"
+                />
+
+                <button
+                  onClick={handleCreateWallet}
+                  disabled={loading}
+                  className="w-full py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow disabled:opacity-50"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Creating...
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                        />
+                      </svg>
+                      Create Wallet
+                    </span>
+                  )}
+                </button>
+
+                {/* Recover from device passkeys */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-card-border"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-card-bg text-foreground/40">
+                      or
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleRecoverWallet}
+                  disabled={loading}
+                  className="w-full py-4 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold disabled:opacity-50"
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    Recover from Passkey
+                  </span>
+                </button>
               </>
             )}
 
@@ -1069,7 +1084,9 @@ export default function WalletApp() {
             {/* Token Balances Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-foreground/60">Tokens</h3>
+                <h3 className="text-sm font-medium text-foreground/60">
+                  Tokens
+                </h3>
                 <button
                   onClick={() => setView("tokens")}
                   className="text-xs text-accent-light hover:text-accent transition-colors"
@@ -1102,7 +1119,8 @@ export default function WalletApp() {
                               alt={tb.token.symbol}
                               className="w-8 h-8 rounded-full"
                               onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = "none";
+                                (e.target as HTMLImageElement).style.display =
+                                  "none";
                               }}
                             />
                           ) : (
@@ -1114,7 +1132,9 @@ export default function WalletApp() {
                           )}
                           <div>
                             <div className="font-medium">{tb.token.symbol}</div>
-                            <div className="text-xs text-foreground/40">{tb.token.name}</div>
+                            <div className="text-xs text-foreground/40">
+                              {tb.token.name}
+                            </div>
                           </div>
                         </div>
                         <div className="text-right">
@@ -1124,7 +1144,8 @@ export default function WalletApp() {
                         </div>
                       </div>
                     ))}
-                  {tokenBalances.filter((tb) => parseFloat(tb.balance) > 0).length === 0 && (
+                  {tokenBalances.filter((tb) => parseFloat(tb.balance) > 0)
+                    .length === 0 && (
                     <div className="text-center py-4 text-foreground/40 text-sm">
                       No token balances
                     </div>
@@ -1237,7 +1258,8 @@ export default function WalletApp() {
                                 alt={tb.token.symbol}
                                 className="w-8 h-8 rounded-full mx-auto mb-1"
                                 onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = "none";
+                                  (e.target as HTMLImageElement).style.display =
+                                    "none";
                                 }}
                               />
                             ) : (
@@ -1638,7 +1660,8 @@ export default function WalletApp() {
             {/* Token List */}
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-foreground/60">
-                All Tokens on {network.charAt(0).toUpperCase() + network.slice(1)}
+                All Tokens on{" "}
+                {network.charAt(0).toUpperCase() + network.slice(1)}
               </h3>
 
               {loadingTokens ? (
@@ -1704,7 +1727,9 @@ export default function WalletApp() {
                           </div>
                           {isCustom && (
                             <button
-                              onClick={() => handleRemoveToken(tb.token.address)}
+                              onClick={() =>
+                                handleRemoveToken(tb.token.address)
+                              }
                               className="p-2 rounded-lg hover:bg-error/20 text-error/60 hover:text-error transition-colors"
                               title="Remove token"
                             >
