@@ -22,8 +22,28 @@ import {
   getAddressExplorerUrl,
   NETWORKS,
 } from "@/lib/wallet";
+import {
+  initWalletConnect,
+  setEventCallbacks,
+  connectWithUri,
+  approveSession,
+  rejectSession,
+  getActiveSessions,
+  disconnectSession,
+  handleSessionRequest,
+  formatRequestDisplay,
+  type SessionProposal,
+  type SessionRequest,
+  type ActiveSession,
+} from "@/lib/walletconnect";
 
-type View = "onboarding" | "wallet" | "send" | "receive";
+type View =
+  | "onboarding"
+  | "wallet"
+  | "send"
+  | "receive"
+  | "connect"
+  | "sessions";
 
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
@@ -37,35 +57,56 @@ export default function WalletApp() {
   const [hasCredential, setHasCredential] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [storedWallets, setStoredWallets] = useState<StoredWallet[]>([]);
-  const [walletBalances, setWalletBalances] = useState<Record<string, string>>({});
+  const [walletBalances, setWalletBalances] = useState<Record<string, string>>(
+    {}
+  );
   const [loadingBalances, setLoadingBalances] = useState(false);
-  const [selectedWalletIndex, setSelectedWalletIndex] = useState<number | null>(null);
+  const [selectedWalletIndex, setSelectedWalletIndex] = useState<number | null>(
+    null
+  );
 
   // Send form state
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
   const [txHash, setTxHash] = useState<string | null>(null);
 
+  // WalletConnect state
+  const [wcUri, setWcUri] = useState("");
+  const [wcConnecting, setWcConnecting] = useState(false);
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
+  const [sessionProposal, setSessionProposal] =
+    useState<SessionProposal | null>(null);
+  const [sessionRequest, setSessionRequest] = useState<SessionRequest | null>(
+    null
+  );
+  const [wcInitialized, setWcInitialized] = useState(false);
+
   // Fetch balances for all stored wallets
-  const fetchWalletBalances = useCallback(async (wallets: StoredWallet[]) => {
-    if (wallets.length === 0) return;
-    setLoadingBalances(true);
-    const balances: Record<string, string> = {};
+  const fetchWalletBalances = useCallback(
+    async (wallets: StoredWallet[]) => {
+      if (wallets.length === 0) return;
+      setLoadingBalances(true);
+      const balances: Record<string, string> = {};
 
-    await Promise.all(
-      wallets.map(async (w) => {
-        try {
-          const result = await getBalance(w.address as `0x${string}`, network);
-          balances[w.address] = result.formatted;
-        } catch {
-          balances[w.address] = "0";
-        }
-      })
-    );
+      await Promise.all(
+        wallets.map(async (w) => {
+          try {
+            const result = await getBalance(
+              w.address as `0x${string}`,
+              network
+            );
+            balances[w.address] = result.formatted;
+          } catch {
+            balances[w.address] = "0";
+          }
+        })
+      );
 
-    setWalletBalances(balances);
-    setLoadingBalances(false);
-  }, [network]);
+      setWalletBalances(balances);
+      setLoadingBalances(false);
+    },
+    [network]
+  );
 
   // Check for existing credential on mount
   useEffect(() => {
@@ -79,6 +120,40 @@ export default function WalletApp() {
       setView("wallet");
     }
   }, [fetchWalletBalances]);
+
+  // Initialize WalletConnect when wallet is available
+  useEffect(() => {
+    if (!wallet || wcInitialized) return;
+
+    const init = async () => {
+      try {
+        await initWalletConnect();
+
+        // Set up event callbacks
+        setEventCallbacks({
+          onSessionProposal: (proposal) => {
+            setSessionProposal(proposal);
+          },
+          onSessionRequest: (request) => {
+            setSessionRequest(request);
+          },
+          onSessionDelete: async () => {
+            const sessions = await getActiveSessions();
+            setActiveSessions(sessions);
+          },
+        });
+
+        // Load existing sessions
+        const sessions = await getActiveSessions();
+        setActiveSessions(sessions);
+        setWcInitialized(true);
+      } catch (err) {
+        console.error("Failed to initialize WalletConnect:", err);
+      }
+    };
+
+    init();
+  }, [wallet, wcInitialized]);
 
   // Fetch balance when wallet changes
   const fetchBalance = useCallback(async () => {
@@ -245,6 +320,101 @@ export default function WalletApp() {
     }
   };
 
+  // WalletConnect: Connect to dApp
+  const handleWcConnect = async () => {
+    if (!wcUri.trim()) {
+      setError("Please enter a WalletConnect URI");
+      return;
+    }
+
+    setWcConnecting(true);
+    setError(null);
+
+    try {
+      await connectWithUri(wcUri);
+      setWcUri("");
+      // Session proposal will come via the callback
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to connect");
+    } finally {
+      setWcConnecting(false);
+    }
+  };
+
+  // WalletConnect: Approve session
+  const handleApproveSession = async () => {
+    if (!sessionProposal || !wallet) return;
+
+    setLoading(true);
+    try {
+      const session = await approveSession(
+        sessionProposal.id,
+        sessionProposal.params,
+        wallet.address
+      );
+      setActiveSessions((prev) => [...prev, session]);
+      setSessionProposal(null);
+      setSuccess("Connected to dApp!");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to approve session"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // WalletConnect: Reject session
+  const handleRejectSession = async () => {
+    if (!sessionProposal) return;
+
+    try {
+      await rejectSession(sessionProposal.id);
+      setSessionProposal(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject session");
+    }
+  };
+
+  // WalletConnect: Handle request (approve/reject)
+  const handleWcRequest = async (approve: boolean) => {
+    if (!sessionRequest || !wallet) return;
+
+    setLoading(true);
+    try {
+      const result = await handleSessionRequest(
+        sessionRequest,
+        wallet.privateKey,
+        approve
+      );
+      if (result && approve) {
+        setSuccess("Request approved!");
+        setTimeout(() => setSuccess(null), 3000);
+      }
+      setSessionRequest(null);
+      fetchBalance(); // Refresh balance after transaction
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to process request"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // WalletConnect: Disconnect session
+  const handleDisconnectSession = async (topic: string) => {
+    try {
+      await disconnectSession(topic);
+      setActiveSessions((prev) => prev.filter((s) => s.topic !== topic));
+      setSuccess("Disconnected from dApp");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disconnect");
+    }
+  };
+
   // Copy address to clipboard
   const copyAddress = async () => {
     if (!wallet) return;
@@ -324,10 +494,7 @@ export default function WalletApp() {
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      <svg
-                        className="animate-spin h-5 w-5"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -396,10 +563,7 @@ export default function WalletApp() {
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      <svg
-                        className="animate-spin h-5 w-5"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -476,7 +640,8 @@ export default function WalletApp() {
                               <div>
                                 <div className="font-medium">{w.username}</div>
                                 <div className="font-mono text-xs text-foreground/40">
-                                  {w.address.slice(0, 6)}...{w.address.slice(-4)}
+                                  {w.address.slice(0, 6)}...
+                                  {w.address.slice(-4)}
                                 </div>
                               </div>
                             </div>
@@ -488,9 +653,13 @@ export default function WalletApp() {
                               ) : (
                                 <>
                                   <div className="font-semibold tabular-nums">
-                                    {parseFloat(walletBalances[w.address] || "0").toFixed(4)}
+                                    {parseFloat(
+                                      walletBalances[w.address] || "0"
+                                    ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-foreground/40">ETH</div>
+                                  <div className="text-xs text-foreground/40">
+                                    ETH
+                                  </div>
                                 </>
                               )}
                             </div>
@@ -533,7 +702,9 @@ export default function WalletApp() {
                         <div className="w-full border-t border-card-border"></div>
                       </div>
                       <div className="relative flex justify-center text-sm">
-                        <span className="px-4 bg-card-bg text-foreground/40">or</span>
+                        <span className="px-4 bg-card-bg text-foreground/40">
+                          or
+                        </span>
                       </div>
                     </div>
 
@@ -787,6 +958,22 @@ export default function WalletApp() {
                 Receive
               </button>
             </div>
+
+            {/* WalletConnect button */}
+            <button
+              onClick={() => setView("connect")}
+              className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-white flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6.09 10.11c3.26-3.19 8.56-3.19 11.82 0l.39.38a.4.4 0 010 .58l-1.35 1.32a.21.21 0 01-.3 0l-.54-.53c-2.27-2.22-5.96-2.22-8.23 0l-.58.56a.21.21 0 01-.3 0L5.66 11.1a.4.4 0 010-.58l.43-.41zm14.6 2.71l1.2 1.18a.4.4 0 010 .58l-5.42 5.3a.42.42 0 01-.59 0l-3.85-3.76a.1.1 0 00-.15 0l-3.85 3.77a.42.42 0 01-.59 0L2.02 14.6a.4.4 0 010-.58l1.2-1.18a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0z" />
+              </svg>
+              Connect to dApp
+              {activeSessions.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-white/20 text-xs">
+                  {activeSessions.length}
+                </span>
+              )}
+            </button>
           </div>
         )}
 
@@ -894,10 +1081,7 @@ export default function WalletApp() {
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      <svg
-                        className="animate-spin h-5 w-5"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -993,6 +1177,248 @@ export default function WalletApp() {
                 Send only ETH or ERC-20 tokens to this address on{" "}
                 {network.charAt(0).toUpperCase() + network.slice(1)}
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Connect View */}
+        {view === "connect" && wallet && (
+          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Connect to dApp</h2>
+              <button
+                onClick={() => setView("wallet")}
+                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-foreground/60 mb-2">
+                  WalletConnect URI
+                </label>
+                <input
+                  type="text"
+                  placeholder="wc:..."
+                  value={wcUri}
+                  onChange={(e) => setWcUri(e.target.value)}
+                  className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 font-mono text-sm"
+                />
+                <p className="text-xs text-foreground/40 mt-2">
+                  Copy the WalletConnect URI from the dApp and paste it here
+                </p>
+              </div>
+
+              <button
+                onClick={handleWcConnect}
+                disabled={wcConnecting || !wcUri.trim()}
+                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-white disabled:opacity-50"
+              >
+                {wcConnecting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                        fill="none"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Connecting...
+                  </span>
+                ) : (
+                  "Connect"
+                )}
+              </button>
+            </div>
+
+            {/* Active Sessions */}
+            {activeSessions.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-foreground/60">
+                  Connected dApps
+                </h3>
+                {activeSessions.map((session) => (
+                  <div
+                    key={session.topic}
+                    className="flex items-center justify-between p-4 rounded-xl bg-input-bg border border-card-border"
+                  >
+                    <div className="flex items-center gap-3">
+                      {session.peerMeta.icons[0] && (
+                        <img
+                          src={session.peerMeta.icons[0]}
+                          alt=""
+                          className="w-10 h-10 rounded-lg"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                      )}
+                      <div>
+                        <div className="font-medium">
+                          {session.peerMeta.name}
+                        </div>
+                        <div className="text-xs text-foreground/40">
+                          {session.peerMeta.url}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDisconnectSession(session.topic)}
+                      className="p-2 rounded-lg hover:bg-error/20 text-error transition-colors"
+                      title="Disconnect"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Session Proposal Modal */}
+        {sessionProposal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div className="bg-card-bg border border-card-border rounded-2xl p-6 max-w-md w-full space-y-6 animate-fade-in">
+              <div className="text-center space-y-4">
+                {sessionProposal.params.proposer.metadata.icons[0] && (
+                  <img
+                    src={sessionProposal.params.proposer.metadata.icons[0]}
+                    alt=""
+                    className="w-16 h-16 rounded-xl mx-auto"
+                  />
+                )}
+                <div>
+                  <h3 className="text-xl font-semibold">
+                    {sessionProposal.params.proposer.metadata.name}
+                  </h3>
+                  <p className="text-sm text-foreground/40">
+                    {sessionProposal.params.proposer.metadata.url}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-input-bg border border-card-border">
+                <p className="text-sm text-foreground/60">
+                  This dApp wants to connect to your wallet
+                </p>
+                <p className="text-xs text-foreground/40 mt-2">
+                  {sessionProposal.params.proposer.metadata.description}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={handleRejectSession}
+                  className="py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold"
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={handleApproveSession}
+                  disabled={loading}
+                  className="py-3 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white disabled:opacity-50"
+                >
+                  {loading ? "Connecting..." : "Approve"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Session Request Modal */}
+        {sessionRequest && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div className="bg-card-bg border border-card-border rounded-2xl p-6 max-w-md w-full space-y-6 animate-fade-in">
+              {(() => {
+                const display = formatRequestDisplay(sessionRequest);
+                return (
+                  <>
+                    <div className="text-center">
+                      <div className="w-16 h-16 rounded-xl bg-warning/20 flex items-center justify-center mx-auto mb-4">
+                        <svg
+                          className="w-8 h-8 text-warning"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                          />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-semibold">
+                        {display.method}
+                      </h3>
+                      <p className="text-sm text-foreground/60 mt-2">
+                        {display.description}
+                      </p>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-input-bg border border-card-border max-h-40 overflow-auto">
+                      <pre className="text-xs font-mono text-foreground/60 whitespace-pre-wrap break-all">
+                        {display.details}
+                      </pre>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => handleWcRequest(false)}
+                        disabled={loading}
+                        className="py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                      <button
+                        onClick={() => handleWcRequest(true)}
+                        disabled={loading}
+                        className="py-3 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white disabled:opacity-50"
+                      >
+                        {loading ? "Signing..." : "Approve"}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}

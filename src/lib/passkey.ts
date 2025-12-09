@@ -94,7 +94,9 @@ export function getStoredWallets(): StoredWallet[] {
 function saveWalletToList(wallet: StoredWallet): void {
   const wallets = getStoredWallets();
   // Check if already exists
-  const existingIndex = wallets.findIndex(w => w.credentialId === wallet.credentialId);
+  const existingIndex = wallets.findIndex(
+    (w) => w.credentialId === wallet.credentialId
+  );
   if (existingIndex >= 0) {
     wallets[existingIndex] = wallet;
   } else {
@@ -118,7 +120,8 @@ export async function registerPasskey(
       },
       user: {
         id: bufferToBase64url(
-          new TextEncoder().encode(username + "-" + Date.now()).buffer as ArrayBuffer
+          new TextEncoder().encode(username + "-" + Date.now())
+            .buffer as ArrayBuffer
         ),
         name: username,
         displayName: username,
@@ -258,7 +261,7 @@ export async function recoverWallet(): Promise<PasskeyWallet | null> {
 
     // Check if this wallet is in our list, if so get the username
     const wallets = getStoredWallets();
-    const existingWallet = wallets.find(w => w.credentialId === credentialId);
+    const existingWallet = wallets.find((w) => w.credentialId === credentialId);
     if (existingWallet) {
       credential.username = existingWallet.username;
     }
@@ -287,7 +290,9 @@ export async function recoverWallet(): Promise<PasskeyWallet | null> {
 }
 
 // Authenticate with a specific stored wallet
-export async function authenticateWithWallet(storedWallet: StoredWallet): Promise<PasskeyWallet | null> {
+export async function authenticateWithWallet(
+  storedWallet: StoredWallet
+): Promise<PasskeyWallet | null> {
   const challenge = generateChallenge();
 
   try {
