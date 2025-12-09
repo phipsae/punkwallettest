@@ -13,6 +13,7 @@ import {
   type PasskeyWallet,
   type StoredWallet,
 } from "@/lib/passkey";
+import PunkAvatar, { PunkBlockie } from "./PunkAvatar";
 import {
   getBalance,
   sendETH,
@@ -525,20 +526,23 @@ export default function WalletApp() {
   if (!mounted) {
     return (
       <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
-        <div className="w-20 h-20 rounded-2xl bg-accent/20 glow animate-pulse-glow flex items-center justify-center">
-          <svg
-            className="w-10 h-10 text-accent-light"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
+        <div className="flex flex-col items-center gap-4 animate-pulse-glow">
+          <div className="punk-loader">
+            <svg width="80" height="80" viewBox="0 0 24 24" className="punk-icon">
+              <rect width="24" height="24" fill="#639bff" rx="3" />
+              {/* Simple punk face */}
+              <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
+              <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
+              <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
+              <rect x="9" y="12" width="1" height="1" fill="#000" />
+              <rect x="14" y="12" width="1" height="1" fill="#000" />
+              <rect x="11" y="15" width="2" height="1" fill="#000" />
+              {/* Mohawk */}
+              <rect x="11" y="4" width="2" height="6" fill="#ff1493" />
+              <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
+            </svg>
+          </div>
+          <div className="text-accent-light font-bold text-lg">Loading...</div>
         </div>
       </div>
     );
@@ -549,25 +553,32 @@ export default function WalletApp() {
     return (
       <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
         <div className="w-full max-w-md space-y-8 animate-fade-in">
-          {/* Logo */}
+          {/* Logo with Punk */}
           <div className="text-center space-y-4">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-accent/20 glow animate-pulse-glow">
-              <svg
-                className="w-10 h-10 text-accent-light"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                />
+            <div className="inline-block glow animate-pulse-glow rounded-2xl overflow-hidden">
+              <svg width="96" height="96" viewBox="0 0 24 24" className="punk-logo">
+                <rect width="24" height="24" fill="#639bff" rx="3" />
+                {/* Punk face */}
+                <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
+                <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
+                <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
+                <rect x="10" y="18" width="4" height="3" fill="#ffd8b1" />
+                {/* Eyes */}
+                <rect x="9" y="12" width="1" height="1" fill="#000" />
+                <rect x="14" y="12" width="1" height="1" fill="#000" />
+                {/* Mouth */}
+                <rect x="11" y="15" width="2" height="1" fill="#000" />
+                {/* Pink Mohawk */}
+                <rect x="11" y="3" width="2" height="7" fill="#ff1493" />
+                <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
+                {/* Sunglasses */}
+                <rect x="8" y="11" width="3" height="2" fill="#000" />
+                <rect x="13" y="11" width="3" height="2" fill="#000" />
+                <rect x="11" y="11" width="2" height="1" fill="#000" />
               </svg>
             </div>
             <h1 className="text-4xl font-bold tracking-tight">
-              <span className="text-accent-light">Punk</span> Wallet
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500">Punk</span> Wallet
             </h1>
             <p className="text-foreground/60 text-lg">
               Self-custodial Ethereum wallet secured by passkeys
@@ -666,11 +677,7 @@ export default function WalletApp() {
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-                                <span className="text-accent-light font-semibold">
-                                  {w.username.charAt(0).toUpperCase()}
-                                </span>
-                              </div>
+                              <PunkAvatar address={w.address} size={48} />
                               <div>
                                 <div className="font-medium">{w.username}</div>
                                 <div className="font-mono text-xs text-foreground/40">
@@ -865,23 +872,21 @@ export default function WalletApp() {
       <header className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center">
-              <svg
-                className="w-5 h-5 text-accent-light"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                />
+            <div className="w-10 h-10 rounded-xl overflow-hidden">
+              <svg width="40" height="40" viewBox="0 0 24 24">
+                <rect width="24" height="24" fill="#639bff" rx="2" />
+                <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
+                <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
+                <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
+                <rect x="9" y="12" width="1" height="1" fill="#000" />
+                <rect x="14" y="12" width="1" height="1" fill="#000" />
+                <rect x="11" y="15" width="2" height="1" fill="#000" />
+                <rect x="11" y="4" width="2" height="6" fill="#ff1493" />
+                <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
               </svg>
             </div>
             <span className="font-bold text-lg">
-              <span className="text-accent-light">Punk</span> Wallet
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">Punk</span> Wallet
             </span>
           </div>
 
@@ -945,23 +950,16 @@ export default function WalletApp() {
         {/* Balance Card */}
         {view === "wallet" && wallet && (
           <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
-            {/* Address */}
+            {/* Address with Punk Avatar */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center">
-                  <svg
-                    className="w-6 h-6 text-accent-light"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                    />
-                  </svg>
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <PunkAvatar address={wallet.address} size={64} className="glow-sm" />
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-success border-2 border-card-bg flex items-center justify-center">
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
                 </div>
                 <div>
                   <button
@@ -1394,14 +1392,25 @@ export default function WalletApp() {
             </div>
 
             <div className="text-center space-y-6 py-4">
+              {/* Punk Avatar */}
+              <div className="flex justify-center">
+                <PunkAvatar address={wallet.address} size={80} className="glow" />
+              </div>
+              
               {/* QR Code */}
-              <div className="inline-flex items-center justify-center bg-white rounded-2xl p-4 mx-auto">
+              <div className="inline-flex items-center justify-center bg-white rounded-2xl p-4 mx-auto relative">
                 <QRCodeSVG
                   value={wallet.address}
                   size={180}
                   level="H"
                   includeMargin={false}
                 />
+                {/* Punk overlay in center of QR */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="bg-white p-1 rounded-lg">
+                    <PunkBlockie address={wallet.address} size={36} />
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -1415,7 +1424,7 @@ export default function WalletApp() {
 
               <button
                 onClick={copyAddress}
-                className="py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold inline-flex items-center gap-2"
+                className="py-3 px-6 rounded-xl bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 transition-all duration-200 font-semibold text-white inline-flex items-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -1889,10 +1898,19 @@ export default function WalletApp() {
           </div>
         )}
 
-        {/* Info card */}
+        {/* Info card - Punk themed */}
         <div className="bg-card-bg/50 border border-card-border rounded-xl p-4 text-center text-sm text-foreground/40">
-          <p>
-            🔐 Your keys are secured by passkeys and never leave your device
+          <p className="flex items-center justify-center gap-2">
+            <span className="text-punk-pink">🤘</span>
+            <span>Your keys are secured by passkeys and never leave your device</span>
+            <span className="text-punk-cyan">🤘</span>
+          </p>
+        </div>
+
+        {/* Punk Gallery Footer */}
+        <div className="py-4 text-center">
+          <p className="text-xs text-foreground/30">
+            Powered by <span className="text-punk-pink">EIP-7951</span> secp256r1 verification
           </p>
         </div>
       </main>
