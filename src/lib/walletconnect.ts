@@ -1,9 +1,9 @@
 import { Core } from "@walletconnect/core";
 import { WalletKit, WalletKitTypes } from "@reown/walletkit";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
-import { formatEther, parseEther, type Hex } from "viem";
+import { formatEther, type Hex, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia, mainnet } from "viem/chains";
+import { sepolia, mainnet, arbitrum, base } from "viem/chains";
 
 // WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
 const PROJECT_ID =
@@ -13,6 +13,8 @@ const PROJECT_ID =
 const SUPPORTED_CHAINS = {
   "eip155:1": mainnet,
   "eip155:11155111": sepolia,
+  "eip155:42161": arbitrum,
+  "eip155:8453": base,
 };
 
 const SUPPORTED_METHODS = [
@@ -268,19 +270,27 @@ export async function handleSessionRequest(
           gasPrice?: string;
         };
 
-        // For now, we'll just sign the transaction
-        // In a real implementation, you'd broadcast it to the network
+        // Map chain IDs to network names and chain objects
         const { createWalletClientForNetwork } = await import("./wallet");
         const chainId = params.chainId.split(":")[1];
-        const networkId = chainId === "1" ? "mainnet" : "sepolia";
+        const chainIdToNetwork: Record<string, { name: string; chain: Chain }> =
+          {
+            "1": { name: "mainnet", chain: mainnet },
+            "11155111": { name: "sepolia", chain: sepolia },
+            "42161": { name: "arbitrum", chain: arbitrum },
+            "8453": { name: "base", chain: base },
+          };
+
+        const networkInfo =
+          chainIdToNetwork[chainId] || chainIdToNetwork["11155111"];
         const walletClient = createWalletClientForNetwork(
           privateKey,
-          networkId
+          networkInfo.name
         );
 
         const hash = await walletClient.sendTransaction({
           account,
-          chain: chainId === "1" ? mainnet : sepolia,
+          chain: networkInfo.chain,
           to: tx.to as Hex,
           value: tx.value ? BigInt(tx.value) : undefined,
           data: tx.data as Hex | undefined,
