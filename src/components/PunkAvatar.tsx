@@ -27,7 +27,7 @@ export function PunkAvatar({
         width: size,
         height: size,
         backgroundColor: punkData.backgroundColor,
-        borderRadius: "8px",
+        borderRadius: "2px",
         overflow: "hidden",
         imageRendering: "pixelated",
       }}
@@ -568,7 +568,7 @@ export function PunkBlockie({
       style={{
         width: size,
         height: size,
-        borderRadius: "4px",
+        borderRadius: "2px",
         overflow: "hidden",
       }}
     >

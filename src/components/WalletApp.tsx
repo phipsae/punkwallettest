@@ -544,7 +544,7 @@ export default function WalletApp() {
   // Show loading state until mounted to prevent hydration mismatch
   if (!mounted) {
     return (
-      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
+      <div className="min-h-screen gradient-bg flex items-center justify-center p-4 safe-area-all">
         <div className="flex flex-col items-center gap-4 animate-pulse-glow">
           <div className="punk-loader">
             <svg
@@ -553,7 +553,7 @@ export default function WalletApp() {
               viewBox="0 0 24 24"
               className="punk-icon"
             >
-              <rect width="24" height="24" fill="#639bff" rx="3" />
+              <rect width="24" height="24" fill="#84cc16" rx="1" />
               {/* Simple punk face */}
               <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
               <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
@@ -562,11 +562,13 @@ export default function WalletApp() {
               <rect x="14" y="12" width="1" height="1" fill="#000" />
               <rect x="11" y="15" width="2" height="1" fill="#000" />
               {/* Mohawk */}
-              <rect x="11" y="4" width="2" height="6" fill="#ff1493" />
-              <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
+              <rect x="11" y="4" width="2" height="6" fill="#65a30d" />
+              <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
             </svg>
           </div>
-          <div className="text-accent-light font-bold text-lg">Loading...</div>
+          <div className="text-accent-light font-medium text-lg tracking-tight">
+            Loading...
+          </div>
         </div>
       </div>
     );
@@ -575,18 +577,32 @@ export default function WalletApp() {
   // Render onboarding view
   if (view === "onboarding") {
     return (
-      <div className="min-h-screen gradient-bg cyber-grid flex items-center justify-center p-4 safe-area-all">
-        <div className="w-full max-w-md space-y-8 animate-fade-in">
+      <div className="min-h-screen gradient-bg flex flex-col p-4 safe-area-all relative">
+        {/* BG Logo - upper right corner */}
+        <div className="absolute top-4 right-4 safe-area-top">
+          <img
+            src="/BGLogo.svg"
+            alt="BG"
+            width={32}
+            height={30}
+            className="opacity-50"
+          />
+        </div>
+
+        {/* Spacer to push content down */}
+        <div className="h-16"></div>
+
+        <div className="w-full max-w-md mx-auto space-y-6 animate-fade-in">
           {/* Logo with Punk */}
           <div className="text-center space-y-4">
-            <div className="inline-block glow animate-pulse-glow rounded-2xl overflow-hidden">
+            <div className="inline-block border border-card-border rounded-sm overflow-hidden">
               <svg
                 width="96"
                 height="96"
                 viewBox="0 0 24 24"
                 className="punk-logo"
               >
-                <rect width="24" height="24" fill="#639bff" rx="3" />
+                <rect width="24" height="24" fill="#84cc16" rx="1" />
                 {/* Punk face */}
                 <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
                 <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
@@ -597,9 +613,9 @@ export default function WalletApp() {
                 <rect x="14" y="12" width="1" height="1" fill="#000" />
                 {/* Mouth */}
                 <rect x="11" y="15" width="2" height="1" fill="#000" />
-                {/* Pink Mohawk */}
-                <rect x="11" y="3" width="2" height="7" fill="#ff1493" />
-                <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
+                {/* Lime Mohawk */}
+                <rect x="11" y="3" width="2" height="7" fill="#65a30d" />
+                <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
                 {/* Sunglasses */}
                 <rect x="8" y="11" width="3" height="2" fill="#000" />
                 <rect x="13" y="11" width="3" height="2" fill="#000" />
@@ -607,23 +623,22 @@ export default function WalletApp() {
               </svg>
             </div>
             <h1 className="text-4xl font-bold tracking-tight">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500">
-                Punk
-              </span>{" "}
-              Wallet
+              <span className="text-accent">Punk</span> Wallet
             </h1>
-            <p className="text-foreground/60 text-lg">
+            <p className="text-muted text-base">
               Self-custodial Ethereum wallet secured by passkeys
             </p>
           </div>
 
           {/* Card */}
-          <div className="bg-card-bg border border-card-border rounded-2xl p-8 space-y-6 glow-sm">
+          <div className="bg-card-bg border border-card-border rounded-sm p-8 space-y-6">
             {hasCredential ? (
               <>
                 <div className="text-center space-y-2">
-                  <h2 className="text-xl font-semibold">Welcome back</h2>
-                  <p className="text-foreground/60">
+                  <h2 className="text-xl font-semibold tracking-tight">
+                    Welcome back
+                  </h2>
+                  <p className="text-muted">
                     Unlock your wallet with your passkey
                   </p>
                 </div>
@@ -631,7 +646,7 @@ export default function WalletApp() {
                 <button
                   onClick={handleUnlockWallet}
                   disabled={loading}
-                  className="w-full py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow disabled:opacity-50"
+                  className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background btn-hover disabled:opacity-50"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -675,7 +690,7 @@ export default function WalletApp() {
 
                 <button
                   onClick={handleReset}
-                  className="w-full py-3 text-foreground/60 hover:text-foreground transition-colors"
+                  className="w-full py-3 text-muted hover:text-foreground transition-colors"
                 >
                   Use a different wallet
                 </button>
@@ -686,13 +701,13 @@ export default function WalletApp() {
                 {storedWallets.length > 0 && (
                   <>
                     <div className="text-center space-y-2">
-                      <h2 className="text-xl font-semibold">Your Wallets</h2>
-                      <p className="text-foreground/60">
-                        Select a wallet to unlock
-                      </p>
+                      <h2 className="text-xl font-semibold tracking-tight">
+                        Your Wallets
+                      </h2>
+                      <p className="text-muted">Select a wallet to unlock</p>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
                       {storedWallets.map((w, i) => (
                         <button
                           key={i}
@@ -701,10 +716,10 @@ export default function WalletApp() {
                             handleSelectWallet(w);
                           }}
                           disabled={loading}
-                          className={`w-full p-4 rounded-xl border transition-all duration-200 text-left disabled:opacity-50 ${
+                          className={`w-full p-4 rounded-sm border transition-all duration-150 text-left disabled:opacity-50 ${
                             selectedWalletIndex === i
-                              ? "bg-accent/20 border-accent"
-                              : "bg-input-bg border-card-border hover:border-accent/50 hover:bg-card-border/30"
+                              ? "bg-accent/10 border-accent"
+                              : "bg-input-bg border-card-border hover:border-muted"
                           }`}
                         >
                           <div className="flex items-center justify-between">
@@ -712,7 +727,7 @@ export default function WalletApp() {
                               <PunkAvatar address={w.address} size={48} />
                               <div>
                                 <div className="font-medium">{w.username}</div>
-                                <div className="font-mono text-xs text-foreground/40">
+                                <div className="font-mono text-xs text-muted">
                                   {w.address.slice(0, 6)}...
                                   {w.address.slice(-4)}
                                 </div>
@@ -720,7 +735,7 @@ export default function WalletApp() {
                             </div>
                             <div className="text-right">
                               {loadingBalances ? (
-                                <div className="text-sm text-foreground/40">
+                                <div className="text-sm text-muted">
                                   Loading...
                                 </div>
                               ) : (
@@ -730,15 +745,13 @@ export default function WalletApp() {
                                       walletBalances[w.address] || "0"
                                     ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-foreground/40">
-                                    ETH
-                                  </div>
+                                  <div className="text-xs text-muted">ETH</div>
                                 </>
                               )}
                             </div>
                           </div>
                           {selectedWalletIndex === i && loading && (
-                            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-accent-light">
+                            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-accent">
                               <svg
                                 className="animate-spin h-4 w-4"
                                 viewBox="0 0 24 24"
@@ -770,7 +783,7 @@ export default function WalletApp() {
                         <div className="w-full border-t border-card-border"></div>
                       </div>
                       <div className="relative flex justify-center text-sm">
-                        <span className="px-4 bg-card-bg text-foreground/40">
+                        <span className="px-4 bg-card-bg text-muted">
                           or create a new wallet
                         </span>
                       </div>
@@ -781,10 +794,10 @@ export default function WalletApp() {
                 {/* Create wallet section - Show header only if no existing wallets */}
                 {storedWallets.length === 0 && (
                   <div className="text-center space-y-2">
-                    <h2 className="text-xl font-semibold">
+                    <h2 className="text-xl font-semibold tracking-tight">
                       Create your wallet
                     </h2>
-                    <p className="text-foreground/60">
+                    <p className="text-muted">
                       Your wallet will be secured with a passkey
                     </p>
                   </div>
@@ -795,13 +808,13 @@ export default function WalletApp() {
                   placeholder="Enter a username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 focus:border-accent transition-colors"
+                  className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted focus:border-accent transition-colors"
                 />
 
                 <button
                   onClick={handleCreateWallet}
                   disabled={loading}
-                  className="w-full py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow disabled:opacity-50"
+                  className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background btn-hover disabled:opacity-50"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -849,16 +862,14 @@ export default function WalletApp() {
                     <div className="w-full border-t border-card-border"></div>
                   </div>
                   <div className="relative flex justify-center text-sm">
-                    <span className="px-4 bg-card-bg text-foreground/40">
-                      or
-                    </span>
+                    <span className="px-4 bg-card-bg text-muted">or</span>
                   </div>
                 </div>
 
                 <button
                   onClick={handleRecoverWallet}
                   disabled={loading}
-                  className="w-full py-4 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold disabled:opacity-50"
+                  className="w-full py-4 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium disabled:opacity-50"
                 >
                   <span className="flex items-center justify-center gap-2">
                     <svg
@@ -881,14 +892,14 @@ export default function WalletApp() {
             )}
 
             {error && (
-              <div className="p-4 rounded-xl bg-error/20 border border-error/40 text-error text-sm">
+              <div className="p-4 rounded-sm bg-error/10 border border-error/30 text-error text-sm">
                 {error}
               </div>
             )}
           </div>
 
           {/* Info */}
-          <div className="text-center text-foreground/40 text-sm space-y-1">
+          <div className="text-center text-muted text-sm space-y-1">
             <p>Powered by EIP-7951 secp256r1 verification</p>
             <p>Your keys never leave your device</p>
           </div>
@@ -899,29 +910,26 @@ export default function WalletApp() {
 
   // Render wallet view
   return (
-    <div className="min-h-screen gradient-bg cyber-grid safe-area-all">
+    <div className="min-h-screen gradient-bg safe-area-all">
       {/* Header */}
-      <header className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
+      <header className="border-b border-card-border bg-card-bg/80 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl overflow-hidden">
+            <div className="w-10 h-10 rounded-sm overflow-hidden">
               <svg width="40" height="40" viewBox="0 0 24 24">
-                <rect width="24" height="24" fill="#639bff" rx="2" />
+                <rect width="24" height="24" fill="#84cc16" rx="1" />
                 <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
                 <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
                 <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
                 <rect x="9" y="12" width="1" height="1" fill="#000" />
                 <rect x="14" y="12" width="1" height="1" fill="#000" />
                 <rect x="11" y="15" width="2" height="1" fill="#000" />
-                <rect x="11" y="4" width="2" height="6" fill="#ff1493" />
-                <rect x="10" y="8" width="4" height="2" fill="#ff1493" />
+                <rect x="11" y="4" width="2" height="6" fill="#65a30d" />
+                <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
               </svg>
             </div>
-            <span className="font-bold text-lg">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">
-                Punk
-              </span>{" "}
-              Wallet
+            <span className="font-bold text-lg tracking-tight">
+              <span className="text-accent">Punk</span> Wallet
             </span>
           </div>
 
@@ -929,7 +937,7 @@ export default function WalletApp() {
             <select
               value={network}
               onChange={(e) => setNetwork(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-input-bg border border-card-border text-sm cursor-pointer"
+              className="px-3 py-2 rounded-sm bg-input-bg border border-card-border text-sm cursor-pointer"
             >
               {Object.keys(NETWORKS).map((net) => (
                 <option key={net} value={net}>
@@ -944,11 +952,11 @@ export default function WalletApp() {
                 setShowPrivateKey(false);
                 setExportConfirmed(false);
               }}
-              className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              className="p-2 rounded-sm hover:bg-card-border transition-colors"
               title="Export private key"
             >
               <svg
-                className="w-5 h-5 text-foreground/60"
+                className="w-5 h-5 text-muted"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -964,11 +972,11 @@ export default function WalletApp() {
 
             <button
               onClick={handleReset}
-              className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+              className="p-2 rounded-sm hover:bg-card-border transition-colors"
               title="Lock wallet"
             >
               <svg
-                className="w-5 h-5 text-foreground/60"
+                className="w-5 h-5 text-muted"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -989,13 +997,13 @@ export default function WalletApp() {
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
         {/* Notifications */}
         {success && (
-          <div className="p-4 rounded-xl bg-success/20 border border-success/40 text-success text-sm animate-fade-in">
+          <div className="p-4 rounded-sm bg-success/10 border border-success/30 text-success text-sm animate-fade-in">
             {success}
           </div>
         )}
 
         {error && (
-          <div className="p-4 rounded-xl bg-error/20 border border-error/40 text-error text-sm animate-fade-in">
+          <div className="p-4 rounded-sm bg-error/10 border border-error/30 text-error text-sm animate-fade-in">
             {error}
             <button
               onClick={() => setError(null)}
@@ -1008,7 +1016,7 @@ export default function WalletApp() {
 
         {/* Balance Card */}
         {view === "wallet" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             {/* Address with Punk Avatar */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -1016,11 +1024,11 @@ export default function WalletApp() {
                   <PunkAvatar
                     address={wallet.address}
                     size={64}
-                    className="glow-sm"
+                    className="rounded-sm"
                   />
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-success border-2 border-card-bg flex items-center justify-center">
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-sm bg-success border-2 border-card-bg flex items-center justify-center">
                     <svg
-                      className="w-3 h-3 text-white"
+                      className="w-3 h-3 text-background"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -1037,7 +1045,7 @@ export default function WalletApp() {
                 <div>
                   <button
                     onClick={copyAddress}
-                    className="font-mono text-lg hover:text-accent-light transition-colors flex items-center gap-2"
+                    className="font-mono text-lg hover:text-accent transition-colors flex items-center gap-2"
                   >
                     {formatAddress(wallet.address)}
                     <svg
@@ -1058,7 +1066,7 @@ export default function WalletApp() {
                     href={getAddressExplorerUrl(wallet.address, network)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-foreground/40 hover:text-accent-light transition-colors"
+                    className="text-sm text-muted hover:text-accent transition-colors"
                   >
                     View on Explorer ↗
                   </a>
@@ -1067,11 +1075,11 @@ export default function WalletApp() {
 
               <button
                 onClick={fetchBalance}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
                 title="Refresh balance"
               >
                 <svg
-                  className="w-5 h-5 text-foreground/60"
+                  className="w-5 h-5 text-muted"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1088,17 +1096,17 @@ export default function WalletApp() {
 
             {/* Balance */}
             <div className="text-center py-8">
-              <div className="text-5xl font-bold tabular-nums">
+              <div className="text-5xl font-bold tabular-nums tracking-tight">
                 {parseFloat(balance).toFixed(6)}
               </div>
-              <div className="text-xl text-foreground/60 mt-2">ETH</div>
+              <div className="text-xl text-muted mt-2">ETH</div>
             </div>
 
             {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setView("send")}
-                className="py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow flex items-center justify-center gap-2"
+                className="py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background btn-hover flex items-center justify-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -1117,7 +1125,7 @@ export default function WalletApp() {
               </button>
               <button
                 onClick={() => setView("receive")}
-                className="py-4 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold flex items-center justify-center gap-2"
+                className="py-4 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium flex items-center justify-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -1139,14 +1147,14 @@ export default function WalletApp() {
             {/* WalletConnect button */}
             <button
               onClick={() => setView("connect")}
-              className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-white flex items-center justify-center gap-2"
+              className="w-full py-4 px-6 rounded-sm bg-punk-cyan hover:bg-punk-cyan/90 transition-all duration-150 font-medium text-background flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6.09 10.11c3.26-3.19 8.56-3.19 11.82 0l.39.38a.4.4 0 010 .58l-1.35 1.32a.21.21 0 01-.3 0l-.54-.53c-2.27-2.22-5.96-2.22-8.23 0l-.58.56a.21.21 0 01-.3 0L5.66 11.1a.4.4 0 010-.58l.43-.41zm14.6 2.71l1.2 1.18a.4.4 0 010 .58l-5.42 5.3a.42.42 0 01-.59 0l-3.85-3.76a.1.1 0 00-.15 0l-3.85 3.77a.42.42 0 01-.59 0L2.02 14.6a.4.4 0 010-.58l1.2-1.18a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0z" />
               </svg>
               Connect to dApp
               {activeSessions.length > 0 && (
-                <span className="ml-2 px-2 py-0.5 rounded-full bg-white/20 text-xs">
+                <span className="ml-2 px-2 py-0.5 rounded-sm bg-background/20 text-xs">
                   {activeSessions.length}
                 </span>
               )}
@@ -1155,23 +1163,21 @@ export default function WalletApp() {
             {/* Token Balances Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-foreground/60">
-                  Tokens
-                </h3>
+                <h3 className="text-sm font-medium text-muted">Tokens</h3>
                 <button
                   onClick={() => setView("tokens")}
-                  className="text-xs text-accent-light hover:text-accent transition-colors"
+                  className="text-xs text-accent hover:text-accent-light transition-colors"
                 >
                   Manage Tokens
                 </button>
               </div>
 
               {loadingTokens ? (
-                <div className="text-center py-4 text-foreground/40 text-sm">
+                <div className="text-center py-4 text-muted text-sm">
                   Loading tokens...
                 </div>
               ) : tokenBalances.length === 0 ? (
-                <div className="text-center py-4 text-foreground/40 text-sm">
+                <div className="text-center py-4 text-muted text-sm">
                   No tokens found
                 </div>
               ) : (
@@ -1181,29 +1187,29 @@ export default function WalletApp() {
                     .map((tb) => (
                       <div
                         key={tb.token.address}
-                        className="flex items-center justify-between p-3 rounded-xl bg-input-bg border border-card-border hover:border-accent/30 transition-colors"
+                        className="flex items-center justify-between p-3 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
                       >
                         <div className="flex items-center gap-3">
                           {tb.token.logoURI ? (
                             <img
                               src={tb.token.logoURI}
                               alt={tb.token.symbol}
-                              className="w-8 h-8 rounded-full"
+                              className="w-8 h-8 rounded-sm"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display =
                                   "none";
                               }}
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-                              <span className="text-xs font-bold text-accent-light">
+                            <div className="w-8 h-8 rounded-sm bg-accent/10 flex items-center justify-center">
+                              <span className="text-xs font-bold text-accent">
                                 {tb.token.symbol.slice(0, 2)}
                               </span>
                             </div>
                           )}
                           <div>
                             <div className="font-medium">{tb.token.symbol}</div>
-                            <div className="text-xs text-foreground/40">
+                            <div className="text-xs text-muted">
                               {tb.token.name}
                             </div>
                           </div>
@@ -1217,7 +1223,7 @@ export default function WalletApp() {
                     ))}
                   {tokenBalances.filter((tb) => parseFloat(tb.balance) > 0)
                     .length === 0 && (
-                    <div className="text-center py-4 text-foreground/40 text-sm">
+                    <div className="text-center py-4 text-muted text-sm">
                       No token balances
                     </div>
                   )}
@@ -1229,9 +1235,9 @@ export default function WalletApp() {
 
         {/* Send View */}
         {view === "send" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-xl font-semibold tracking-tight">
                 Send {selectedToken ? selectedToken.symbol : "ETH"}
               </h2>
               <button
@@ -1241,7 +1247,7 @@ export default function WalletApp() {
                   setError(null);
                   setSelectedToken(null);
                 }}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -1261,7 +1267,7 @@ export default function WalletApp() {
 
             {txHash ? (
               <div className="space-y-4 py-8 text-center">
-                <div className="w-16 h-16 rounded-full bg-success/20 flex items-center justify-center mx-auto">
+                <div className="w-16 h-16 rounded-sm bg-success/10 flex items-center justify-center mx-auto">
                   <svg
                     className="w-8 h-8 text-success"
                     fill="none"
@@ -1281,7 +1287,7 @@ export default function WalletApp() {
                   href={getExplorerUrl(txHash, network)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-accent-light hover:text-accent transition-colors text-sm"
+                  className="text-accent hover:text-accent-light transition-colors text-sm"
                 >
                   View on Explorer ↗
                 </a>
@@ -1290,21 +1296,21 @@ export default function WalletApp() {
               <div className="space-y-4">
                 {/* Token Selection */}
                 <div>
-                  <label className="block text-sm text-foreground/60 mb-2">
-                    Asset
-                  </label>
+                  <label className="block text-sm text-muted mb-2">Asset</label>
                   <div className="grid grid-cols-4 gap-2">
                     <button
                       onClick={() => setSelectedToken(null)}
-                      className={`p-3 rounded-xl border transition-all ${
+                      className={`p-3 rounded-sm border transition-all ${
                         selectedToken === null
-                          ? "bg-accent/20 border-accent"
-                          : "bg-input-bg border-card-border hover:border-accent/50"
+                          ? "bg-accent/10 border-accent"
+                          : "bg-input-bg border-card-border hover:border-muted"
                       }`}
                     >
                       <div className="text-center">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center mx-auto mb-1">
-                          <span className="text-xs font-bold">Ξ</span>
+                        <div className="w-8 h-8 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
+                          <span className="text-xs font-bold text-accent">
+                            Ξ
+                          </span>
                         </div>
                         <div className="text-xs font-medium">ETH</div>
                       </div>
@@ -1316,10 +1322,10 @@ export default function WalletApp() {
                         <button
                           key={tb.token.address}
                           onClick={() => setSelectedToken(tb.token)}
-                          className={`p-3 rounded-xl border transition-all ${
+                          className={`p-3 rounded-sm border transition-all ${
                             selectedToken?.address === tb.token.address
-                              ? "bg-accent/20 border-accent"
-                              : "bg-input-bg border-card-border hover:border-accent/50"
+                              ? "bg-accent/10 border-accent"
+                              : "bg-input-bg border-card-border hover:border-muted"
                           }`}
                         >
                           <div className="text-center">
@@ -1327,14 +1333,14 @@ export default function WalletApp() {
                               <img
                                 src={tb.token.logoURI}
                                 alt={tb.token.symbol}
-                                className="w-8 h-8 rounded-full mx-auto mb-1"
+                                className="w-8 h-8 rounded-sm mx-auto mb-1"
                                 onError={(e) => {
                                   (e.target as HTMLImageElement).style.display =
                                     "none";
                                 }}
                               />
                             ) : (
-                              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-1">
+                              <div className="w-8 h-8 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
                                 <span className="text-xs font-bold">
                                   {tb.token.symbol.slice(0, 2)}
                                 </span>
@@ -1350,7 +1356,7 @@ export default function WalletApp() {
                 </div>
 
                 <div>
-                  <label className="block text-sm text-foreground/60 mb-2">
+                  <label className="block text-sm text-muted mb-2">
                     Recipient Address
                   </label>
                   <input
@@ -1358,12 +1364,12 @@ export default function WalletApp() {
                     placeholder="0x..."
                     value={sendTo}
                     onChange={(e) => setSendTo(e.target.value)}
-                    className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 font-mono text-sm"
+                    className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm text-foreground/60 mb-2">
+                  <label className="block text-sm text-muted mb-2">
                     Amount ({selectedToken ? selectedToken.symbol : "ETH"})
                   </label>
                   <div className="relative">
@@ -1374,7 +1380,7 @@ export default function WalletApp() {
                       onChange={(e) => setSendAmount(e.target.value)}
                       step="0.0001"
                       min="0"
-                      className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 pr-16"
+                      className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted pr-16"
                     />
                     <button
                       onClick={() => {
@@ -1387,12 +1393,12 @@ export default function WalletApp() {
                           setAmount(balance);
                         }
                       }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-accent-light hover:text-accent"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-accent hover:text-accent-light"
                     >
                       MAX
                     </button>
                   </div>
-                  <p className="text-sm text-foreground/40 mt-2">
+                  <p className="text-sm text-muted mt-2">
                     Balance:{" "}
                     {selectedToken
                       ? formatTokenAmount(
@@ -1408,7 +1414,7 @@ export default function WalletApp() {
                 <button
                   onClick={handleSend}
                   disabled={loading || !sendTo || !sendAmount}
-                  className="w-full py-4 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white btn-glow disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
@@ -1441,12 +1447,14 @@ export default function WalletApp() {
 
         {/* Receive View */}
         {view === "receive" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Receive ETH</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Receive ETH
+              </h2>
               <button
                 onClick={() => setView("wallet")}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -1470,12 +1478,12 @@ export default function WalletApp() {
                 <PunkAvatar
                   address={wallet.address}
                   size={80}
-                  className="glow"
+                  className="rounded-sm"
                 />
               </div>
 
               {/* QR Code */}
-              <div className="inline-flex items-center justify-center bg-white rounded-2xl p-4 mx-auto relative">
+              <div className="inline-flex items-center justify-center bg-foreground rounded-sm p-4 mx-auto relative">
                 <QRCodeSVG
                   value={wallet.address}
                   size={180}
@@ -1484,15 +1492,15 @@ export default function WalletApp() {
                 />
                 {/* Punk overlay in center of QR */}
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="bg-white p-1 rounded-lg">
+                  <div className="bg-foreground p-1 rounded-sm">
                     <PunkBlockie address={wallet.address} size={36} />
                   </div>
                 </div>
               </div>
 
               <div>
-                <p className="text-foreground/60 text-sm mb-2">Your Address</p>
-                <div className="bg-input-bg border border-card-border rounded-xl p-4">
+                <p className="text-muted text-sm mb-2">Your Address</p>
+                <div className="bg-input-bg border border-card-border rounded-sm p-4">
                   <code className="font-mono text-sm break-all">
                     {wallet.address}
                   </code>
@@ -1501,7 +1509,7 @@ export default function WalletApp() {
 
               <button
                 onClick={copyAddress}
-                className="py-3 px-6 rounded-xl bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 transition-all duration-200 font-semibold text-white inline-flex items-center gap-2"
+                className="py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background inline-flex items-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -1519,7 +1527,7 @@ export default function WalletApp() {
                 Copy Address
               </button>
 
-              <p className="text-foreground/40 text-sm">
+              <p className="text-muted text-sm">
                 Send only ETH or ERC-20 tokens to this address on{" "}
                 {network.charAt(0).toUpperCase() + network.slice(1)}
               </p>
@@ -1529,16 +1537,18 @@ export default function WalletApp() {
 
         {/* Export Private Key View */}
         {view === "export" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Export Private Key</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Export Private Key
+              </h2>
               <button
                 onClick={() => {
                   setView("wallet");
                   setShowPrivateKey(false);
                   setExportConfirmed(false);
                 }}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -1559,9 +1569,9 @@ export default function WalletApp() {
             {!exportConfirmed ? (
               <div className="space-y-6">
                 {/* Warning Box */}
-                <div className="p-4 rounded-xl bg-error/10 border border-error/30">
+                <div className="p-4 rounded-sm bg-error/10 border border-error/30">
                   <div className="flex items-start gap-3">
-                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-error/20 flex items-center justify-center">
+                    <div className="shrink-0 w-10 h-10 rounded-sm bg-error/20 flex items-center justify-center">
                       <svg
                         className="w-6 h-6 text-error"
                         fill="none"
@@ -1597,13 +1607,13 @@ export default function WalletApp() {
                 </div>
 
                 {/* Wallet info */}
-                <div className="flex items-center gap-4 p-4 rounded-xl bg-input-bg border border-card-border">
+                <div className="flex items-center gap-4 p-4 rounded-sm bg-input-bg border border-card-border">
                   <PunkAvatar address={wallet.address} size={48} />
                   <div>
                     <div className="font-medium">
                       {wallet.credential.username || "Wallet"}
                     </div>
-                    <div className="text-sm text-foreground/50 font-mono">
+                    <div className="text-sm text-muted font-mono">
                       {formatAddress(wallet.address)}
                     </div>
                   </div>
@@ -1615,7 +1625,7 @@ export default function WalletApp() {
                     type="checkbox"
                     checked={exportConfirmed}
                     onChange={(e) => setExportConfirmed(e.target.checked)}
-                    className="mt-1 w-5 h-5 rounded border-card-border bg-input-bg accent-accent cursor-pointer"
+                    className="mt-1 w-5 h-5 rounded-sm border-card-border bg-input-bg accent-accent cursor-pointer"
                   />
                   <span className="text-sm text-foreground/70">
                     I understand the risks and take full responsibility for
@@ -1628,12 +1638,10 @@ export default function WalletApp() {
                 {/* Private Key Display */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm text-foreground/60">
-                      Private Key
-                    </label>
+                    <label className="text-sm text-muted">Private Key</label>
                     <button
                       onClick={() => setShowPrivateKey(!showPrivateKey)}
-                      className="text-sm text-accent-light hover:text-accent transition-colors flex items-center gap-1"
+                      className="text-sm text-accent hover:text-accent-light transition-colors flex items-center gap-1"
                     >
                       {showPrivateKey ? (
                         <>
@@ -1680,7 +1688,7 @@ export default function WalletApp() {
                   </div>
 
                   <div className="relative">
-                    <div className="bg-input-bg border border-card-border rounded-xl p-4 pr-12">
+                    <div className="bg-input-bg border border-card-border rounded-sm p-4 pr-12">
                       <code className="font-mono text-sm break-all select-all">
                         {showPrivateKey
                           ? wallet.privateKey
@@ -1690,11 +1698,11 @@ export default function WalletApp() {
                     {showPrivateKey && (
                       <button
                         onClick={copyPrivateKey}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-sm hover:bg-card-border transition-colors"
                         title="Copy private key"
                       >
                         <svg
-                          className="w-5 h-5 text-foreground/60"
+                          className="w-5 h-5 text-muted"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -1712,9 +1720,9 @@ export default function WalletApp() {
                 </div>
 
                 {/* Warning reminder */}
-                <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 flex items-center gap-2">
+                <div className="p-3 rounded-sm bg-warning/10 border border-warning/30 flex items-center gap-2">
                   <svg
-                    className="w-5 h-5 text-warning flex-shrink-0"
+                    className="w-5 h-5 text-warning shrink-0"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -1726,7 +1734,7 @@ export default function WalletApp() {
                       d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                     />
                   </svg>
-                  <span className="text-xs text-foreground/60">
+                  <span className="text-xs text-muted">
                     Never paste this key into websites or share it with anyone
                   </span>
                 </div>
@@ -1735,7 +1743,7 @@ export default function WalletApp() {
                 {showPrivateKey && (
                   <button
                     onClick={copyPrivateKey}
-                    className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 transition-all duration-200 font-semibold text-white flex items-center justify-center gap-2"
+                    className="w-full py-3 px-6 rounded-sm bg-error hover:bg-error/90 transition-all duration-150 font-medium text-background flex items-center justify-center gap-2"
                   >
                     <svg
                       className="w-5 h-5"
@@ -1760,7 +1768,7 @@ export default function WalletApp() {
                     setShowPrivateKey(false);
                     setExportConfirmed(false);
                   }}
-                  className="w-full py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-medium"
+                  className="w-full py-3 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium"
                 >
                   Hide & Go Back
                 </button>
@@ -1771,12 +1779,14 @@ export default function WalletApp() {
 
         {/* Connect View */}
         {view === "connect" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Connect to dApp</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Connect to dApp
+              </h2>
               <button
                 onClick={() => setView("wallet")}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -1796,7 +1806,7 @@ export default function WalletApp() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-foreground/60 mb-2">
+                <label className="block text-sm text-muted mb-2">
                   WalletConnect URI
                 </label>
                 <input
@@ -1804,9 +1814,9 @@ export default function WalletApp() {
                   placeholder="wc:..."
                   value={wcUri}
                   onChange={(e) => setWcUri(e.target.value)}
-                  className="w-full px-4 py-4 rounded-xl bg-input-bg border border-card-border text-foreground placeholder-foreground/40 font-mono text-sm"
+                  className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
                 />
-                <p className="text-xs text-foreground/40 mt-2">
+                <p className="text-xs text-muted mt-2">
                   Copy the WalletConnect URI from the dApp and paste it here
                 </p>
               </div>
@@ -1814,7 +1824,7 @@ export default function WalletApp() {
               <button
                 onClick={handleWcConnect}
                 disabled={wcConnecting || !wcUri.trim()}
-                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-white disabled:opacity-50"
+                className="w-full py-4 px-6 rounded-sm bg-punk-cyan hover:bg-punk-cyan/90 transition-all duration-150 font-medium text-background disabled:opacity-50"
               >
                 {wcConnecting ? (
                   <span className="flex items-center justify-center gap-2">
@@ -1845,20 +1855,20 @@ export default function WalletApp() {
             {/* Active Sessions */}
             {activeSessions.length > 0 && (
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-foreground/60">
+                <h3 className="text-sm font-medium text-muted">
                   Connected dApps
                 </h3>
                 {activeSessions.map((session) => (
                   <div
                     key={session.topic}
-                    className="flex items-center justify-between p-4 rounded-xl bg-input-bg border border-card-border"
+                    className="flex items-center justify-between p-4 rounded-sm bg-input-bg border border-card-border"
                   >
                     <div className="flex items-center gap-3">
                       {session.peerMeta.icons[0] && (
                         <img
                           src={session.peerMeta.icons[0]}
                           alt=""
-                          className="w-10 h-10 rounded-lg"
+                          className="w-10 h-10 rounded-sm"
                           onError={(e) => {
                             (e.target as HTMLImageElement).style.display =
                               "none";
@@ -1869,14 +1879,14 @@ export default function WalletApp() {
                         <div className="font-medium">
                           {session.peerMeta.name}
                         </div>
-                        <div className="text-xs text-foreground/40">
+                        <div className="text-xs text-muted">
                           {session.peerMeta.url}
                         </div>
                       </div>
                     </div>
                     <button
                       onClick={() => handleDisconnectSession(session.topic)}
-                      className="p-2 rounded-lg hover:bg-error/20 text-error transition-colors"
+                      className="p-2 rounded-sm hover:bg-error/10 text-error transition-colors"
                       title="Disconnect"
                     >
                       <svg
@@ -1902,15 +1912,17 @@ export default function WalletApp() {
 
         {/* Tokens Management View */}
         {view === "tokens" && wallet && (
-          <div className="bg-card-bg border border-card-border rounded-2xl p-6 space-y-6 glow-sm animate-fade-in">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Manage Tokens</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Manage Tokens
+              </h2>
               <button
                 onClick={() => {
                   setView("wallet");
                   setShowAddToken(false);
                 }}
-                className="p-2 rounded-lg hover:bg-card-border/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -1930,10 +1942,10 @@ export default function WalletApp() {
 
             {/* Add Custom Token Section */}
             {showAddToken ? (
-              <div className="space-y-4 p-4 rounded-xl bg-input-bg border border-card-border">
+              <div className="space-y-4 p-4 rounded-sm bg-input-bg border border-card-border">
                 <h3 className="font-medium">Add Custom Token</h3>
                 <div>
-                  <label className="block text-sm text-foreground/60 mb-2">
+                  <label className="block text-sm text-muted mb-2">
                     Token Contract Address
                   </label>
                   <input
@@ -1941,7 +1953,7 @@ export default function WalletApp() {
                     placeholder="0x..."
                     value={customTokenAddress}
                     onChange={(e) => setCustomTokenAddress(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-card-bg border border-card-border text-foreground placeholder-foreground/40 font-mono text-sm"
+                    className="w-full px-4 py-3 rounded-sm bg-card-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
                   />
                 </div>
                 <div className="flex gap-3">
@@ -1950,14 +1962,14 @@ export default function WalletApp() {
                       setShowAddToken(false);
                       setCustomTokenAddress("");
                     }}
-                    className="flex-1 py-3 px-4 rounded-xl bg-card-border hover:bg-card-border/80 transition-all font-medium"
+                    className="flex-1 py-3 px-4 rounded-sm bg-card-border hover:bg-muted/20 transition-all font-medium"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleAddCustomToken}
                     disabled={addingToken || !customTokenAddress}
-                    className="flex-1 py-3 px-4 rounded-xl bg-accent hover:bg-accent-dark transition-all font-medium text-white disabled:opacity-50"
+                    className="flex-1 py-3 px-4 rounded-sm bg-accent hover:bg-accent-dark transition-all font-medium text-background disabled:opacity-50"
                   >
                     {addingToken ? "Adding..." : "Add Token"}
                   </button>
@@ -1966,7 +1978,7 @@ export default function WalletApp() {
             ) : (
               <button
                 onClick={() => setShowAddToken(true)}
-                className="w-full py-3 px-4 rounded-xl border border-dashed border-card-border hover:border-accent/50 transition-all text-foreground/60 hover:text-foreground flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 rounded-sm border border-dashed border-card-border hover:border-muted transition-all text-muted hover:text-foreground flex items-center justify-center gap-2"
               >
                 <svg
                   className="w-5 h-5"
@@ -1987,13 +1999,13 @@ export default function WalletApp() {
 
             {/* Token List */}
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-foreground/60">
+              <h3 className="text-sm font-medium text-muted">
                 All Tokens on{" "}
                 {network.charAt(0).toUpperCase() + network.slice(1)}
               </h3>
 
               {loadingTokens ? (
-                <div className="text-center py-8 text-foreground/40">
+                <div className="text-center py-8 text-muted">
                   Loading tokens...
                 </div>
               ) : (
@@ -2009,22 +2021,22 @@ export default function WalletApp() {
                     return (
                       <div
                         key={tb.token.address}
-                        className="flex items-center justify-between p-4 rounded-xl bg-input-bg border border-card-border"
+                        className="flex items-center justify-between p-4 rounded-sm bg-input-bg border border-card-border"
                       >
                         <div className="flex items-center gap-3">
                           {tb.token.logoURI ? (
                             <img
                               src={tb.token.logoURI}
                               alt={tb.token.symbol}
-                              className="w-10 h-10 rounded-full"
+                              className="w-10 h-10 rounded-sm"
                               onError={(e) => {
                                 (e.target as HTMLImageElement).style.display =
                                   "none";
                               }}
                             />
                           ) : (
-                            <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-                              <span className="text-sm font-bold text-accent-light">
+                            <div className="w-10 h-10 rounded-sm bg-accent/10 flex items-center justify-center">
+                              <span className="text-sm font-bold text-accent">
                                 {tb.token.symbol.slice(0, 2)}
                               </span>
                             </div>
@@ -2033,12 +2045,12 @@ export default function WalletApp() {
                             <div className="font-medium flex items-center gap-2">
                               {tb.token.symbol}
                               {isCustom && (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent-light">
+                                <span className="text-xs px-2 py-0.5 rounded-sm bg-accent/10 text-accent">
                                   Custom
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-foreground/40">
+                            <div className="text-xs text-muted">
                               {tb.token.name}
                             </div>
                           </div>
@@ -2048,7 +2060,7 @@ export default function WalletApp() {
                             <div className="font-semibold tabular-nums">
                               {formatTokenAmount(tb.balance)}
                             </div>
-                            <div className="text-xs text-foreground/40 font-mono">
+                            <div className="text-xs text-muted font-mono">
                               {tb.token.address.slice(0, 6)}...
                               {tb.token.address.slice(-4)}
                             </div>
@@ -2058,7 +2070,7 @@ export default function WalletApp() {
                               onClick={() =>
                                 handleRemoveToken(tb.token.address)
                               }
-                              className="p-2 rounded-lg hover:bg-error/20 text-error/60 hover:text-error transition-colors"
+                              className="p-2 rounded-sm hover:bg-error/10 text-error/60 hover:text-error transition-colors"
                               title="Remove token"
                             >
                               <svg
@@ -2086,7 +2098,7 @@ export default function WalletApp() {
 
             <button
               onClick={() => fetchTokenBalances()}
-              className="w-full py-3 px-4 rounded-xl bg-card-border hover:bg-card-border/80 transition-all font-medium flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-sm bg-card-border hover:bg-muted/20 transition-all font-medium flex items-center justify-center gap-2"
             >
               <svg
                 className="w-5 h-5"
@@ -2108,46 +2120,46 @@ export default function WalletApp() {
 
         {/* Session Proposal Modal */}
         {sessionProposal && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-card-bg border border-card-border rounded-2xl p-6 max-w-md w-full space-y-6 animate-fade-in">
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+            <div className="bg-card-bg border border-card-border rounded-sm p-6 max-w-md w-full space-y-6 animate-fade-in">
               <div className="text-center space-y-4">
                 {sessionProposal.params.proposer.metadata.icons[0] && (
                   <img
                     src={sessionProposal.params.proposer.metadata.icons[0]}
                     alt=""
-                    className="w-16 h-16 rounded-xl mx-auto"
+                    className="w-16 h-16 rounded-sm mx-auto"
                   />
                 )}
                 <div>
-                  <h3 className="text-xl font-semibold">
+                  <h3 className="text-xl font-semibold tracking-tight">
                     {sessionProposal.params.proposer.metadata.name}
                   </h3>
-                  <p className="text-sm text-foreground/40">
+                  <p className="text-sm text-muted">
                     {sessionProposal.params.proposer.metadata.url}
                   </p>
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-input-bg border border-card-border">
-                <p className="text-sm text-foreground/60">
+              <div className="p-4 rounded-sm bg-input-bg border border-card-border">
+                <p className="text-sm text-foreground/70">
                   This dApp wants to connect to your wallet
                 </p>
-                <p className="text-xs text-foreground/40 mt-2">
+                <p className="text-xs text-muted mt-2">
                   {sessionProposal.params.proposer.metadata.description}
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={handleRejectSession}
-                  className="py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold"
+                  className="py-3 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium"
                 >
                   Reject
                 </button>
                 <button
                   onClick={handleApproveSession}
                   disabled={loading}
-                  className="py-3 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white disabled:opacity-50"
+                  className="py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background disabled:opacity-50"
                 >
                   {loading ? "Connecting..." : "Approve"}
                 </button>
@@ -2158,14 +2170,14 @@ export default function WalletApp() {
 
         {/* Session Request Modal */}
         {sessionRequest && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-            <div className="bg-card-bg border border-card-border rounded-2xl p-6 max-w-md w-full space-y-6 animate-fade-in">
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+            <div className="bg-card-bg border border-card-border rounded-sm p-6 max-w-md w-full space-y-6 animate-fade-in">
               {(() => {
                 const display = formatRequestDisplay(sessionRequest);
                 return (
                   <>
                     <div className="text-center">
-                      <div className="w-16 h-16 rounded-xl bg-warning/20 flex items-center justify-center mx-auto mb-4">
+                      <div className="w-16 h-16 rounded-sm bg-warning/10 flex items-center justify-center mx-auto mb-4">
                         <svg
                           className="w-8 h-8 text-warning"
                           fill="none"
@@ -2180,32 +2192,32 @@ export default function WalletApp() {
                           />
                         </svg>
                       </div>
-                      <h3 className="text-xl font-semibold">
+                      <h3 className="text-xl font-semibold tracking-tight">
                         {display.method}
                       </h3>
-                      <p className="text-sm text-foreground/60 mt-2">
+                      <p className="text-sm text-muted mt-2">
                         {display.description}
                       </p>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-input-bg border border-card-border max-h-40 overflow-auto">
-                      <pre className="text-xs font-mono text-foreground/60 whitespace-pre-wrap break-all">
+                    <div className="p-4 rounded-sm bg-input-bg border border-card-border max-h-40 overflow-auto">
+                      <pre className="text-xs font-mono text-muted whitespace-pre-wrap break-all">
                         {display.details}
                       </pre>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => handleWcRequest(false)}
                         disabled={loading}
-                        className="py-3 px-6 rounded-xl bg-card-border hover:bg-card-border/80 transition-all duration-200 font-semibold disabled:opacity-50"
+                        className="py-3 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium disabled:opacity-50"
                       >
                         Reject
                       </button>
                       <button
                         onClick={() => handleWcRequest(true)}
                         disabled={loading}
-                        className="py-3 px-6 rounded-xl bg-accent hover:bg-accent-dark transition-all duration-200 font-semibold text-white disabled:opacity-50"
+                        className="py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background disabled:opacity-50"
                       >
                         {loading ? "Signing..." : "Approve"}
                       </button>
@@ -2217,23 +2229,24 @@ export default function WalletApp() {
           </div>
         )}
 
-        {/* Info card - Punk themed */}
-        <div className="bg-card-bg/50 border border-card-border rounded-xl p-4 text-center text-sm text-foreground/40">
-          <p className="flex items-center justify-center gap-2">
-            <span className="text-punk-pink">🤘</span>
-            <span>
-              Your keys are secured by passkeys and never leave your device
-            </span>
-            <span className="text-punk-cyan">🤘</span>
-          </p>
+        {/* Info card */}
+        <div className="bg-card-bg/50 border border-card-border rounded-sm p-4 text-center text-sm text-muted">
+          <p>Your keys are secured by passkeys and never leave your device</p>
         </div>
 
-        {/* Punk Gallery Footer */}
-        <div className="py-4 text-center">
-          <p className="text-xs text-foreground/30">
-            Powered by <span className="text-punk-pink">EIP-7951</span>{" "}
-            secp256r1 verification
+        {/* Footer */}
+        <div className="py-4 flex items-center justify-center gap-3">
+          <p className="text-xs text-muted">
+            Powered by <span className="text-accent">EIP-7951</span> secp256r1
+            verification
           </p>
+          <img
+            src="/BGLogo.svg"
+            alt="BG"
+            width={20}
+            height={18}
+            className="opacity-50"
+          />
         </div>
       </main>
     </div>
