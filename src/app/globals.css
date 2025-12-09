@@ -3,15 +3,18 @@
 :root {
   --background: #0a0a0f;
   --foreground: #f0f0f5;
-  --accent: #6366f1;
-  --accent-light: #818cf8;
-  --accent-dark: #4f46e5;
+  --accent: #8b5cf6;
+  --accent-light: #a78bfa;
+  --accent-dark: #7c3aed;
   --success: #10b981;
   --warning: #f59e0b;
   --error: #ef4444;
   --card-bg: #12121a;
   --card-border: #1f1f2e;
   --input-bg: #0d0d14;
+  --punk-pink: #ff1493;
+  --punk-cyan: #00ced1;
+  --punk-blue: #639bff;
 }
 
 @theme inline {
@@ -26,6 +29,9 @@
   --color-card-bg: var(--card-bg);
   --color-card-border: var(--card-border);
   --color-input-bg: var(--input-bg);
+  --color-punk-pink: var(--punk-pink);
+  --color-punk-cyan: var(--punk-cyan);
+  --color-punk-blue: var(--punk-blue);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -198,4 +204,118 @@ input:focus {
 /* Number font variant */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Punk Avatar styles */
+.punk-avatar {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.punk-avatar:hover {
+  transform: scale(1.05);
+}
+
+.punk-blockie {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Punk logo animation */
+.punk-logo {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.punk-icon {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Punk gradient text */
+.punk-gradient {
+  background: linear-gradient(135deg, var(--punk-pink), var(--punk-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Punk glow effect */
+.punk-glow {
+  box-shadow: 0 0 20px rgba(255, 20, 147, 0.3), 0 0 40px rgba(0, 206, 209, 0.2);
+}
+
+/* Punk button style */
+.btn-punk {
+  background: linear-gradient(135deg, var(--punk-pink), var(--accent));
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-punk::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.btn-punk:hover::before {
+  left: 100%;
+}
+
+/* Pixelated border effect */
+.pixel-border {
+  box-shadow: inset -2px -2px 0 0 rgba(0, 0, 0, 0.3),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Rainbow border animation */
+@keyframes rainbow-border {
+  0% {
+    border-color: #ff1493;
+  }
+  25% {
+    border-color: #00ced1;
+  }
+  50% {
+    border-color: #639bff;
+  }
+  75% {
+    border-color: #8b5cf6;
+  }
+  100% {
+    border-color: #ff1493;
+  }
+}
+
+.rainbow-border {
+  animation: rainbow-border 4s linear infinite;
+}
+
+/* Scan line effect for retro feel */
+.scan-lines::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.1) 2px,
+    rgba(0, 0, 0, 0.1) 4px
+  );
+  pointer-events: none;
 }
