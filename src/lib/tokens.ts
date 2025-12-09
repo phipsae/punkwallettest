@@ -47,14 +47,16 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       symbol: "DAI",
       name: "Dai Stablecoin",
       decimals: 18,
-      logoURI: "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
     },
     {
       address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
       symbol: "WBTC",
       name: "Wrapped BTC",
       decimals: 8,
-      logoURI: "https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png",
     },
     {
       address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
@@ -108,14 +110,16 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       symbol: "DAI",
       name: "Dai Stablecoin",
       decimals: 18,
-      logoURI: "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
     },
     {
       address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
       symbol: "WBTC",
       name: "Wrapped BTC",
       decimals: 8,
-      logoURI: "https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/7598/small/wrapped_bitcoin_wbtc.png",
     },
     {
       address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
@@ -129,7 +133,8 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       symbol: "ARB",
       name: "Arbitrum",
       decimals: 18,
-      logoURI: "https://assets.coingecko.com/coins/images/16547/small/photo_2023-03-29_21.47.00.jpeg",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/16547/small/photo_2023-03-29_21.47.00.jpeg",
     },
   ],
   base: [
@@ -152,7 +157,8 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       symbol: "DAI",
       name: "Dai Stablecoin",
       decimals: 18,
-      logoURI: "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
+      logoURI:
+        "https://assets.coingecko.com/coins/images/9956/small/Badge_Dai.png",
     },
     {
       address: "0x4200000000000000000000000000000000000006",
@@ -214,7 +220,10 @@ export function addCustomToken(networkId: string, token: Token): void {
 }
 
 // Remove custom token from local storage
-export function removeCustomToken(networkId: string, tokenAddress: string): void {
+export function removeCustomToken(
+  networkId: string,
+  tokenAddress: string
+): void {
   if (typeof window === "undefined") return;
   try {
     const stored = localStorage.getItem(CUSTOM_TOKENS_KEY);
@@ -384,7 +393,10 @@ export async function sendToken(
 }
 
 // Format token amount for display
-export function formatTokenAmount(amount: string, decimals: number = 18): string {
+export function formatTokenAmount(
+  amount: string,
+  decimals: number = 18
+): string {
   const num = parseFloat(amount);
   if (num === 0) return "0";
   if (num < 0.0001) return "<0.0001";
