@@ -468,8 +468,6 @@ export default function WalletApp() {
         setWallet(walletData);
         setHasCredential(true);
         setView("wallet");
-        setSuccess(`Logged in as ${walletInfo.username}`);
-        setTimeout(() => setSuccess(null), 3000);
       } else {
         setError("Failed to authenticate");
       }
@@ -963,24 +961,58 @@ export default function WalletApp() {
       {/* Header */}
       <header className="border-b border-card-border bg-card-bg/80 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-sm overflow-hidden">
-              <svg width="40" height="40" viewBox="0 0 24 24">
-                <rect width="24" height="24" fill="#84cc16" rx="1" />
-                <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
-                <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
-                <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
-                <rect x="9" y="12" width="1" height="1" fill="#000" />
-                <rect x="14" y="12" width="1" height="1" fill="#000" />
-                <rect x="11" y="15" width="2" height="1" fill="#000" />
-                <rect x="11" y="4" width="2" height="6" fill="#65a30d" />
-                <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
-              </svg>
+          {wallet ? (
+            <div className="flex items-center gap-3">
+              <PunkAvatar
+                address={wallet.address}
+                size={40}
+                className="rounded-sm"
+              />
+              <div className="flex flex-col">
+                <span className="font-medium text-sm">
+                  {wallet.credential.username || "Wallet"}
+                </span>
+                <button
+                  onClick={copyAddress}
+                  className="font-mono text-xs text-muted hover:text-accent transition-colors flex items-center gap-1"
+                >
+                  {formatAddress(wallet.address)}
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
-            <span className="font-bold text-lg tracking-tight">
-              <span className="text-accent">Punk</span> Wallet
-            </span>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-sm overflow-hidden">
+                <svg width="40" height="40" viewBox="0 0 24 24">
+                  <rect width="24" height="24" fill="#84cc16" rx="1" />
+                  <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
+                  <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
+                  <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
+                  <rect x="9" y="12" width="1" height="1" fill="#000" />
+                  <rect x="14" y="12" width="1" height="1" fill="#000" />
+                  <rect x="11" y="15" width="2" height="1" fill="#000" />
+                  <rect x="11" y="4" width="2" height="6" fill="#65a30d" />
+                  <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
+                </svg>
+              </div>
+              <span className="font-bold text-lg tracking-tight">
+                <span className="text-accent">Punk</span> Wallet
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <select
@@ -1066,48 +1098,11 @@ export default function WalletApp() {
         {/* Balance Card */}
         {view === "wallet" && wallet && (
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
-            {/* Address with Punk Avatar */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <PunkAvatar
-                  address={wallet.address}
-                  size={64}
-                  className="rounded-sm"
-                />
-                <div>
-                  <button
-                    onClick={copyAddress}
-                    className="font-mono text-lg hover:text-accent transition-colors flex items-center gap-2"
-                  >
-                    {formatAddress(wallet.address)}
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      />
-                    </svg>
-                  </button>
-                  <a
-                    href={getAddressExplorerUrl(wallet.address, network)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-muted hover:text-accent transition-colors"
-                  >
-                    View on Explorer ↗
-                  </a>
-                </div>
-              </div>
-
+            {/* Balance */}
+            <div className="text-center py-4 relative">
               <button
                 onClick={fetchBalance}
-                className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                className="absolute top-0 right-0 p-2 rounded-sm hover:bg-card-border transition-colors"
                 title="Refresh balance"
               >
                 <svg
@@ -1124,10 +1119,6 @@ export default function WalletApp() {
                   />
                 </svg>
               </button>
-            </div>
-
-            {/* Balance */}
-            <div className="text-center py-8">
               <div className="text-5xl font-bold tabular-nums tracking-tight">
                 {parseFloat(balance).toFixed(6)}
               </div>
