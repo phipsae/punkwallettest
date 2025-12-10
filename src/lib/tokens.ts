@@ -375,10 +375,7 @@ export async function sendToken(
 }
 
 // Format token amount for display
-export function formatTokenAmount(
-  amount: string,
-  decimals: number = 18
-): string {
+export function formatTokenAmount(amount: string): string {
   const num = parseFloat(amount);
   if (num === 0) return "0";
   if (num < 0.0001) return "<0.0001";

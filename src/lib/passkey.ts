@@ -2,7 +2,7 @@ import {
   startRegistration,
   startAuthentication,
 } from "@simplewebauthn/browser";
-import { bytesToHex, hexToBytes, keccak256, concat } from "viem";
+import { hexToBytes, keccak256, concat } from "viem";
 
 // Types for our passkey-derived wallet
 export interface PasskeyCredential {

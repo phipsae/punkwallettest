@@ -17,9 +17,6 @@ export function PunkAvatar({
 }: PunkAvatarProps) {
   const punkData = useMemo(() => generatePunkFromAddress(address), [address]);
 
-  // Calculate pixel size for crisp rendering
-  const pixelSize = size / 24; // 24x24 grid
-
   return (
     <div
       className={`punk-avatar ${className}`}
@@ -559,8 +556,6 @@ export function PunkBlockie({
 
     return pixels;
   }, [address]);
-
-  const pixelSize = size / 8;
 
   return (
     <div
