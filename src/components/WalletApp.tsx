@@ -16,6 +16,10 @@ import {
   type StoredWallet,
 } from "@/lib/passkey";
 import PunkAvatar, { PunkBlockie } from "./PunkAvatar";
+import dynamic from "next/dynamic";
+
+// Dynamic import for QR Scanner (uses camera APIs that aren't available during SSR)
+const QRScanner = dynamic(() => import("./QRScanner"), { ssr: false });
 import {
   getBalance,
   sendETH,
@@ -112,6 +116,7 @@ export default function WalletApp() {
     null
   );
   const [wcInitialized, setWcInitialized] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
 
   // Export private key state
   const [showPrivateKey, setShowPrivateKey] = useState(false);
@@ -551,6 +556,25 @@ export default function WalletApp() {
       await connectWithUri(wcUri);
       setWcUri("");
       // Session proposal will come via the callback
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to connect");
+    } finally {
+      setWcConnecting(false);
+    }
+  };
+
+  // Handle QR code scan result
+  const handleQRScan = async (scannedUri: string) => {
+    setShowQRScanner(false);
+    setWcUri(scannedUri);
+
+    // Auto-connect after scanning
+    setWcConnecting(true);
+    setError(null);
+
+    try {
+      await connectWithUri(scannedUri);
+      setWcUri("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to connect");
     } finally {
@@ -2141,6 +2165,41 @@ export default function WalletApp() {
             </div>
 
             <div className="space-y-4">
+              {/* Scan QR Button - Primary Action */}
+              <button
+                onClick={() => setShowQRScanner(true)}
+                disabled={wcConnecting}
+                className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+                  />
+                </svg>
+                Scan QR Code
+              </button>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-card-border"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-4 bg-card-bg text-muted">
+                    or paste URI
+                  </span>
+                </div>
+              </div>
+
+              {/* Manual URI Input */}
               <div>
                 <label className="block text-sm text-muted mb-2">
                   WalletConnect URI
@@ -2152,9 +2211,6 @@ export default function WalletApp() {
                   onChange={(e) => setWcUri(e.target.value)}
                   className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
                 />
-                <p className="text-xs text-muted mt-2">
-                  Copy the WalletConnect URI from the dApp and paste it here
-                </p>
               </div>
 
               <button
@@ -2183,7 +2239,7 @@ export default function WalletApp() {
                     Connecting...
                   </span>
                 ) : (
-                  "Connect"
+                  "Connect with URI"
                 )}
               </button>
             </div>
@@ -2888,6 +2944,14 @@ export default function WalletApp() {
         <p className="text-xs text-muted">Private keys secured by passkeys</p>
         <Image src="/BGLogo.svg" alt="BG" width={18} height={16} />
       </footer>
+
+      {/* QR Scanner Modal */}
+      {showQRScanner && (
+        <QRScanner
+          onScan={handleQRScan}
+          onClose={() => setShowQRScanner(false)}
+        />
+      )}
     </div>
   );
 

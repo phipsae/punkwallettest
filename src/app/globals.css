@@ -255,3 +255,12 @@ input:focus {
   font-family: var(--font-mono), monospace;
   letter-spacing: -0.02em;
 }
+
+/* Native QR Scanner - transparent background for camera view */
+body.scanner-active {
+  background: transparent !important;
+}
+
+body.scanner-active #__next {
+  background: transparent !important;
+}
