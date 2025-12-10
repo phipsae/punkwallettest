@@ -8,6 +8,7 @@ import {
   type WalletClient,
   type Chain,
 } from "viem";
+import { normalize } from "viem/ens";
 import { privateKeyToAccount } from "viem/accounts";
 import { mainnet, arbitrum, base } from "viem/chains";
 
@@ -178,4 +179,61 @@ export function getAddressExplorerUrl(
   };
 
   return `${explorers[networkId] || explorers.base}${address}`;
+}
+
+// Check if input looks like an ENS name
+export function isENSName(input: string): boolean {
+  // ENS names end with .eth or other TLDs like .xyz, .com, etc.
+  // Most common is .eth
+  return (
+    /^[a-zA-Z0-9-]+\.eth$/i.test(input) ||
+    /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/i.test(input)
+  );
+}
+
+// Resolve ENS name to address
+// ENS is only on Ethereum mainnet, so we always use mainnet for resolution
+export async function resolveENS(
+  ensName: string
+): Promise<`0x${string}` | null> {
+  // Create a client specifically for mainnet (where ENS lives)
+  const mainnetClient = createPublicClient({
+    chain: mainnet,
+    transport: http(RPC_URLS.mainnet),
+  });
+
+  try {
+    // Normalize the ENS name (handles unicode, etc.)
+    const normalizedName = normalize(ensName);
+
+    // Resolve the ENS name to an address
+    const address = await mainnetClient.getEnsAddress({
+      name: normalizedName,
+    });
+
+    return address;
+  } catch (error) {
+    console.error("ENS resolution failed:", error);
+    return null;
+  }
+}
+
+// Get ENS name for an address (reverse resolution)
+export async function getENSName(
+  address: `0x${string}`
+): Promise<string | null> {
+  const mainnetClient = createPublicClient({
+    chain: mainnet,
+    transport: http(RPC_URLS.mainnet),
+  });
+
+  try {
+    const name = await mainnetClient.getEnsName({
+      address,
+    });
+    return name;
+  } catch (error) {
+    console.error("ENS reverse resolution failed:", error);
+    return null;
+  }
 }

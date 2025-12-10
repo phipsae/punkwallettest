@@ -23,6 +23,8 @@ import {
   formatAddress,
   getExplorerUrl,
   NETWORKS,
+  isENSName,
+  resolveENS,
 } from "@/lib/wallet";
 import {
   getAllTokenBalances,
@@ -85,6 +87,13 @@ export default function WalletApp() {
   const [sendAmount, setSendAmount] = useState("");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [selectedToken, setSelectedToken] = useState<Token | null>(null); // null = ETH
+
+  // ENS resolution state
+  const [resolvedAddress, setResolvedAddress] = useState<`0x${string}` | null>(
+    null
+  );
+  const [resolvingENS, setResolvingENS] = useState(false);
+  const [ensError, setEnsError] = useState<string | null>(null);
 
   // Token state
   const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
@@ -229,6 +238,44 @@ export default function WalletApp() {
     }
   }, [wallet, network, fetchBalance, fetchTokenBalances]);
 
+  // Resolve ENS names when user types in send field
+  useEffect(() => {
+    // Reset resolved address when input changes
+    setResolvedAddress(null);
+    setEnsError(null);
+
+    // Check if it's already a valid address
+    if (isValidAddress(sendTo)) {
+      return;
+    }
+
+    // Check if it looks like an ENS name
+    if (!isENSName(sendTo)) {
+      return;
+    }
+
+    // Debounce ENS resolution
+    const timeoutId = setTimeout(async () => {
+      setResolvingENS(true);
+      setEnsError(null);
+
+      try {
+        const address = await resolveENS(sendTo);
+        if (address) {
+          setResolvedAddress(address);
+        } else {
+          setEnsError("Could not resolve ENS name");
+        }
+      } catch {
+        setEnsError("Failed to resolve ENS name");
+      } finally {
+        setResolvingENS(false);
+      }
+    }, 500); // Wait 500ms after user stops typing
+
+    return () => clearTimeout(timeoutId);
+  }, [sendTo]);
+
   // Create new wallet
   const handleCreateWallet = async () => {
     if (!username.trim()) {
@@ -283,8 +330,13 @@ export default function WalletApp() {
   const handleSend = async () => {
     if (!wallet) return;
 
-    if (!isValidAddress(sendTo)) {
-      setError("Invalid recipient address");
+    // Determine the recipient address (use resolved ENS or direct address)
+    const recipientAddress =
+      resolvedAddress ||
+      (isValidAddress(sendTo) ? (sendTo as `0x${string}`) : null);
+
+    if (!recipientAddress) {
+      setError("Invalid recipient address or ENS name");
       return;
     }
 
@@ -304,7 +356,7 @@ export default function WalletApp() {
         result = await sendToken(
           wallet.privateKey,
           selectedToken,
-          sendTo as `0x${string}`,
+          recipientAddress,
           sendAmount,
           network
         );
@@ -312,7 +364,7 @@ export default function WalletApp() {
         // Send ETH
         result = await sendETH(
           wallet.privateKey,
-          sendTo as `0x${string}`,
+          recipientAddress,
           sendAmount,
           network
         );
@@ -323,9 +375,11 @@ export default function WalletApp() {
         setSuccess(
           `${selectedToken ? selectedToken.symbol : "ETH"} sent successfully!`
         );
+        setTimeout(() => setSuccess(null), 3000);
         setSendTo("");
         setSendAmount("");
         setSelectedToken(null);
+        setResolvedAddress(null);
         fetchBalance();
         fetchTokenBalances();
       } else {
@@ -1416,15 +1470,81 @@ export default function WalletApp() {
 
                 <div>
                   <label className="block text-sm text-muted mb-2">
-                    Recipient Address
+                    Recipient Address or ENS Name
                   </label>
                   <input
                     type="text"
-                    placeholder="0x..."
+                    placeholder="0x... or vitalik.eth"
                     value={sendTo}
                     onChange={(e) => setSendTo(e.target.value)}
-                    className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
+                    className={`w-full px-4 py-4 rounded-sm bg-input-bg border text-foreground placeholder-muted font-mono text-sm ${
+                      resolvedAddress
+                        ? "border-accent"
+                        : ensError
+                        ? "border-error"
+                        : "border-card-border"
+                    }`}
                   />
+                  {/* ENS Resolution Status */}
+                  {resolvingENS && (
+                    <div className="flex items-center gap-2 mt-2 text-sm text-muted">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Resolving ENS name...
+                    </div>
+                  )}
+                  {resolvedAddress && !resolvingENS && (
+                    <div className="flex items-center gap-2 mt-2 text-sm text-accent">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      <span className="font-mono text-xs">
+                        {formatAddress(resolvedAddress)}
+                      </span>
+                    </div>
+                  )}
+                  {ensError && !resolvingENS && (
+                    <div className="flex items-center gap-2 mt-2 text-sm text-error">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                      {ensError}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1472,7 +1592,13 @@ export default function WalletApp() {
 
                 <button
                   onClick={handleSend}
-                  disabled={loading || !sendTo || !sendAmount}
+                  disabled={
+                    loading ||
+                    !sendTo ||
+                    !sendAmount ||
+                    resolvingENS ||
+                    (isENSName(sendTo) && !resolvedAddress)
+                  }
                   className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? (
