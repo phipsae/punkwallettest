@@ -243,6 +243,14 @@ export default function WalletApp() {
     }
   }, [wallet, network, fetchBalance, fetchTokenBalances]);
 
+  // Auto-dismiss errors after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
   // Resolve ENS names when user types in send field
   useEffect(() => {
     // Reset resolved address when input changes
@@ -1014,12 +1022,6 @@ export default function WalletApp() {
                 </button>
               </>
             )}
-
-            {error && (
-              <div className="p-4 rounded-sm bg-error/10 border border-error/30 text-error text-sm">
-                {error}
-              </div>
-            )}
           </div>
 
           {/* Info */}
@@ -1161,25 +1163,34 @@ export default function WalletApp() {
       </header>
 
       {/* Main content */}
-      {/* Toast Notification */}
+      {/* Toast Notifications - Fixed position */}
       {success && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-success/90 text-background text-sm font-medium shadow-lg animate-fade-in backdrop-blur-sm">
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-accent text-background text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
           {success}
         </div>
       )}
 
+      {error && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-error text-white text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2 max-w-[90vw]">
+          <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="truncate">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="ml-1 p-1 hover:bg-white/20 rounded-full shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <main className="max-w-2xl mx-auto px-4 py-3 pb-16 space-y-4">
-        {error && (
-          <div className="p-4 rounded-sm bg-error/10 border border-error/30 text-error text-sm animate-fade-in">
-            {error}
-            <button
-              onClick={() => setError(null)}
-              className="ml-2 text-error/60 hover:text-error"
-            >
-              ×
-            </button>
-          </div>
-        )}
 
         {/* Balance Card */}
         {view === "wallet" && wallet && (
