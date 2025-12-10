@@ -10,6 +10,7 @@ import {
   recoverWallet,
   getStoredWallets,
   authenticateWithWallet,
+  deleteAccountWithAuth,
   type PasskeyWallet,
   type StoredWallet,
 } from "@/lib/passkey";
@@ -106,6 +107,11 @@ export default function WalletApp() {
   // Export private key state
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [exportConfirmed, setExportConfirmed] = useState(false);
+
+  // Delete account state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
@@ -383,6 +389,50 @@ export default function WalletApp() {
     fetchWalletBalances(wallets);
   };
 
+  // Delete account with passkey authentication
+  const handleDeleteAccount = async () => {
+    if (!wallet) return;
+
+    setDeleting(true);
+    setError(null);
+
+    try {
+      // Create StoredWallet from current wallet
+      const storedWallet: StoredWallet = {
+        credentialId: wallet.credential.credentialId,
+        credentialIdHex: wallet.credential.credentialIdHex,
+        username: wallet.credential.username || "Wallet",
+        address: wallet.address,
+        createdAt: wallet.credential.createdAt,
+      };
+
+      const success = await deleteAccountWithAuth(storedWallet);
+
+      if (success) {
+        // Reset all state and go to onboarding
+        setWallet(null);
+        setView("onboarding");
+        setBalance("0");
+        setUsername("");
+        setHasCredential(false);
+        setShowDeleteConfirm(false);
+        setDeleteConfirmed(false);
+        // Refresh the stored wallets list
+        const wallets = getStoredWallets();
+        setStoredWallets(wallets);
+        fetchWalletBalances(wallets);
+        setSuccess("Account deleted successfully");
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        setError("Failed to authenticate. Please try again.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete account");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Recover wallet using discoverable credentials
   const handleRecoverWallet = async () => {
     setLoading(true);
@@ -585,7 +635,6 @@ export default function WalletApp() {
             alt="BG"
             width={32}
             height={30}
-            className="opacity-50"
           />
         </div>
 
@@ -1020,28 +1069,11 @@ export default function WalletApp() {
             {/* Address with Punk Avatar */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="relative">
-                  <PunkAvatar
-                    address={wallet.address}
-                    size={64}
-                    className="rounded-sm"
-                  />
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-sm bg-success border-2 border-card-bg flex items-center justify-center">
-                    <svg
-                      className="w-3 h-3 text-background"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={3}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </div>
-                </div>
+                <PunkAvatar
+                  address={wallet.address}
+                  size={64}
+                  className="rounded-sm"
+                />
                 <div>
                   <button
                     onClick={copyAddress}
@@ -1774,6 +1806,151 @@ export default function WalletApp() {
                 </button>
               </div>
             )}
+
+            {/* Danger Zone - Delete Account */}
+            <div className="pt-6 mt-6 border-t border-card-border">
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-error">
+                  Danger Zone
+                </h3>
+
+                {!showDeleteConfirm ? (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full py-3 px-6 rounded-sm border border-error/50 text-error hover:bg-error/10 transition-all duration-150 font-medium"
+                  >
+                    Delete Account
+                  </button>
+                ) : (
+                  <div className="space-y-4 p-4 rounded-sm bg-error/5 border border-error/30">
+                    <div className="flex items-start gap-3">
+                      <div className="shrink-0 w-10 h-10 rounded-sm bg-error/20 flex items-center justify-center">
+                        <svg
+                          className="w-6 h-6 text-error"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </div>
+                      <div className="space-y-2">
+                        <h4 className="font-semibold text-error">
+                          Delete this account?
+                        </h4>
+                        <ul className="text-sm text-foreground/70 space-y-1 list-disc list-inside">
+                          <li>
+                            This will remove the account from your wallet list
+                          </li>
+                          <li>
+                            Make sure you&apos;ve backed up your private key
+                            first
+                          </li>
+                          <li>
+                            You&apos;ll need to re-authenticate with your
+                            passkey
+                          </li>
+                          <li>The passkey itself will remain on your device</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Wallet info */}
+                    <div className="flex items-center gap-4 p-3 rounded-sm bg-input-bg border border-card-border">
+                      <PunkAvatar address={wallet.address} size={40} />
+                      <div>
+                        <div className="font-medium text-sm">
+                          {wallet.credential.username || "Wallet"}
+                        </div>
+                        <div className="text-xs text-muted font-mono">
+                          {formatAddress(wallet.address)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Confirmation checkbox */}
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={deleteConfirmed}
+                        onChange={(e) => setDeleteConfirmed(e.target.checked)}
+                        className="mt-1 w-5 h-5 rounded-sm border-card-border bg-input-bg accent-error cursor-pointer"
+                      />
+                      <span className="text-sm text-foreground/70">
+                        I understand this action cannot be undone and I have
+                        backed up my private key
+                      </span>
+                    </label>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => {
+                          setShowDeleteConfirm(false);
+                          setDeleteConfirmed(false);
+                        }}
+                        className="flex-1 py-3 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium"
+                        disabled={deleting}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteAccount}
+                        disabled={!deleteConfirmed || deleting}
+                        className="flex-1 py-3 px-6 rounded-sm bg-error hover:bg-error/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 font-medium text-white flex items-center justify-center gap-2"
+                      >
+                        {deleting ? (
+                          <>
+                            <svg
+                              className="w-5 h-5 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Authenticating...
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="w-5 h-5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                            Delete Account
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -2229,23 +2406,16 @@ export default function WalletApp() {
           </div>
         )}
 
-        {/* Info card */}
-        <div className="bg-card-bg/50 border border-card-border rounded-sm p-4 text-center text-sm text-muted">
-          <p>Your keys are secured by passkeys and never leave your device</p>
-        </div>
-
         {/* Footer */}
-        <div className="py-4 flex items-center justify-center gap-3">
+        <div className="py-4 flex items-center justify-center gap-2">
           <p className="text-xs text-muted">
-            Powered by <span className="text-accent">EIP-7951</span> secp256r1
-            verification
+            Private keys secured by passkeys
           </p>
           <img
             src="/BGLogo.svg"
             alt="BG"
-            width={20}
-            height={18}
-            className="opacity-50"
+            width={18}
+            height={16}
           />
         </div>
       </main>

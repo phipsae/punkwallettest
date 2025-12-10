@@ -377,3 +377,51 @@ export function getStoredCredential(): PasskeyCredential | null {
   if (!stored) return null;
   return JSON.parse(stored);
 }
+
+// Remove a wallet from the stored wallets list
+export function removeWalletFromList(credentialId: string): void {
+  if (typeof window === "undefined") return;
+  const wallets = getStoredWallets();
+  const filtered = wallets.filter((w) => w.credentialId !== credentialId);
+  localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(filtered));
+}
+
+// Delete account with passkey authentication
+// Requires re-authentication before deletion for security
+export async function deleteAccountWithAuth(
+  storedWallet: StoredWallet
+): Promise<boolean> {
+  const challenge = generateChallenge();
+
+  try {
+    // Require passkey authentication before deletion
+    await startAuthentication({
+      optionsJSON: {
+        challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
+        rpId: getPasskeyRpId(),
+        allowCredentials: [
+          {
+            id: storedWallet.credentialId,
+            type: "public-key",
+          },
+        ],
+        userVerification: "required",
+        timeout: 60000,
+      },
+    });
+
+    // Authentication successful - remove from wallets list
+    removeWalletFromList(storedWallet.credentialId);
+
+    // If this was the current credential, clear it
+    const currentCredential = getStoredCredential();
+    if (currentCredential?.credentialId === storedWallet.credentialId) {
+      clearStoredCredential();
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Delete authentication failed:", error);
+    return false;
+  }
+}
