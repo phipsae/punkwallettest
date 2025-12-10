@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
 import {
   registerPasskey,
@@ -21,7 +22,6 @@ import {
   isValidAddress,
   formatAddress,
   getExplorerUrl,
-  getAddressExplorerUrl,
   NETWORKS,
 } from "@/lib/wallet";
 import {
@@ -67,7 +67,7 @@ export default function WalletApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [network, setNetwork] = useState("sepolia");
+  const [network, setNetwork] = useState("base");
   const [username, setUsername] = useState("");
   const [hasCredential, setHasCredential] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -110,8 +110,13 @@ export default function WalletApp() {
 
   // Delete account state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showNetworkModal, setShowNetworkModal] = useState(false);
+  const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [switchingWalletIndex, setSwitchingWalletIndex] = useState<
+    number | null
+  >(null);
 
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
@@ -468,11 +473,10 @@ export default function WalletApp() {
         setWallet(walletData);
         setHasCredential(true);
         setView("wallet");
-      } else {
-        setError("Failed to authenticate");
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to authenticate");
+      // If walletData is null, user likely cancelled - do nothing
+    } catch {
+      // User cancelled or error occurred - silently ignore
     } finally {
       setLoading(false);
       setSelectedWalletIndex(null);
@@ -628,12 +632,7 @@ export default function WalletApp() {
       <div className="min-h-screen gradient-bg flex flex-col p-4 safe-area-all relative">
         {/* BG Logo - upper right corner */}
         <div className="absolute top-4 right-4 safe-area-top">
-          <img
-            src="/BGLogo.svg"
-            alt="BG"
-            width={32}
-            height={30}
-          />
+          <Image src="/BGLogo.svg" alt="BG" width={32} height={30} />
         </div>
 
         {/* Spacer to push content down */}
@@ -957,41 +956,62 @@ export default function WalletApp() {
 
   // Render wallet view
   return (
-    <div className="min-h-screen gradient-bg safe-area-all">
+    <div className="min-h-screen gradient-bg safe-area-bottom">
       {/* Header */}
       <header className="border-b border-card-border bg-card-bg/80 backdrop-blur-sm sticky top-0 z-10 safe-area-top">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-2xl mx-auto px-4 py-1.5 flex items-center justify-between">
           {wallet ? (
             <div className="flex items-center gap-3">
-              <PunkAvatar
-                address={wallet.address}
-                size={40}
-                className="rounded-sm"
-              />
-              <div className="flex flex-col">
-                <span className="font-medium text-sm">
-                  {wallet.credential.username || "Wallet"}
-                </span>
-                <button
-                  onClick={copyAddress}
-                  className="font-mono text-xs text-muted hover:text-accent transition-colors flex items-center gap-1"
+              <button
+                onClick={() => setShowAccountSwitcher(true)}
+                className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+              >
+                <PunkAvatar
+                  address={wallet.address}
+                  size={44}
+                  className="rounded-sm"
+                />
+                <div className="flex flex-col items-start">
+                  <span className="font-medium text-base flex items-center gap-1">
+                    {wallet.credential.username || "Wallet"}
+                    <svg
+                      className="w-3.5 h-3.5 text-muted"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </span>
+                  <span className="font-mono text-sm text-muted">
+                    {formatAddress(wallet.address)}
+                  </span>
+                </div>
+              </button>
+              <button
+                onClick={copyAddress}
+                className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                title="Copy address"
+              >
+                <svg
+                  className="w-4 h-4 text-muted"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
                 >
-                  {formatAddress(wallet.address)}
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                  </svg>
-                </button>
-              </div>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                  />
+                </svg>
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-3">
@@ -1014,19 +1034,7 @@ export default function WalletApp() {
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            <select
-              value={network}
-              onChange={(e) => setNetwork(e.target.value)}
-              className="px-3 py-2 rounded-sm bg-input-bg border border-card-border text-sm cursor-pointer"
-            >
-              {Object.keys(NETWORKS).map((net) => (
-                <option key={net} value={net}>
-                  {net.charAt(0).toUpperCase() + net.slice(1)}
-                </option>
-              ))}
-            </select>
-
+          <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 setView("export");
@@ -1075,14 +1083,14 @@ export default function WalletApp() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-        {/* Notifications */}
-        {success && (
-          <div className="p-4 rounded-sm bg-success/10 border border-success/30 text-success text-sm animate-fade-in">
-            {success}
-          </div>
-        )}
+      {/* Toast Notification */}
+      {success && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-success/90 text-background text-sm font-medium shadow-lg animate-fade-in backdrop-blur-sm">
+          {success}
+        </div>
+      )}
 
+      <main className="max-w-2xl mx-auto px-4 py-3 pb-16 space-y-4">
         {error && (
           <div className="p-4 rounded-sm bg-error/10 border border-error/30 text-error text-sm animate-fade-in">
             {error}
@@ -1100,6 +1108,31 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             {/* Balance */}
             <div className="text-center py-4 relative">
+              {/* Network Selector - Top Left */}
+              <button
+                onClick={() => setShowNetworkModal(true)}
+                className="absolute top-0 left-0 px-3 py-1.5 rounded-sm bg-card-border hover:bg-muted/30 transition-colors flex items-center gap-2"
+              >
+                <span className="w-2 h-2 rounded-full bg-accent"></span>
+                <span className="text-sm font-medium">
+                  {network.charAt(0).toUpperCase() + network.slice(1)}
+                </span>
+                <svg
+                  className="w-3.5 h-3.5 text-muted"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {/* Refresh Button - Top Right */}
               <button
                 onClick={fetchBalance}
                 className="absolute top-0 right-0 p-2 rounded-sm hover:bg-card-border transition-colors"
@@ -1119,10 +1152,11 @@ export default function WalletApp() {
                   />
                 </svg>
               </button>
-              <div className="text-5xl font-bold tabular-nums tracking-tight">
+
+              <div className="text-4xl font-bold tabular-nums tracking-tight pt-6">
                 {parseFloat(balance).toFixed(6)}
               </div>
-              <div className="text-xl text-muted mt-2">ETH</div>
+              <div className="text-lg text-muted mt-1">ETH</div>
             </div>
 
             {/* Action buttons */}
@@ -1214,6 +1248,7 @@ export default function WalletApp() {
                       >
                         <div className="flex items-center gap-3">
                           {tb.token.logoURI ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={tb.token.logoURI}
                               alt={tb.token.symbol}
@@ -1353,6 +1388,7 @@ export default function WalletApp() {
                         >
                           <div className="text-center">
                             {tb.token.logoURI ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
                               <img
                                 src={tb.token.logoURI}
                                 alt={tb.token.symbol}
@@ -1712,10 +1748,16 @@ export default function WalletApp() {
 
                   <div className="relative">
                     <div className="bg-input-bg border border-card-border rounded-sm p-4 pr-12">
-                      <code className="font-mono text-sm break-all select-all">
+                      <code
+                        className="font-mono text-sm select-all block"
+                        style={{
+                          wordBreak: "break-all",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
                         {showPrivateKey
                           ? wallet.privateKey
-                          : "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"}
+                          : "••••••••••••••••••••••••••••••••"}
                       </code>
                     </div>
                     {showPrivateKey && (
@@ -2033,6 +2075,7 @@ export default function WalletApp() {
                   >
                     <div className="flex items-center gap-3">
                       {session.peerMeta.icons[0] && (
+                        /* eslint-disable-next-line @next/next/no-img-element */
                         <img
                           src={session.peerMeta.icons[0]}
                           alt=""
@@ -2193,6 +2236,7 @@ export default function WalletApp() {
                       >
                         <div className="flex items-center gap-3">
                           {tb.token.logoURI ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
                             <img
                               src={tb.token.logoURI}
                               alt={tb.token.symbol}
@@ -2286,12 +2330,327 @@ export default function WalletApp() {
           </div>
         )}
 
+        {/* Network Selection Modal */}
+        {showNetworkModal && (
+          <div
+            className="fixed inset-0 bg-black/80 flex items-end justify-center z-50"
+            onClick={() => setShowNetworkModal(false)}
+          >
+            <div
+              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold">Select Network</h3>
+                <button
+                  onClick={() => setShowNetworkModal(false)}
+                  className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                >
+                  <svg
+                    className="w-5 h-5 text-muted"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {Object.keys(NETWORKS).map((net) => (
+                  <button
+                    key={net}
+                    onClick={() => {
+                      setNetwork(net);
+                      setShowNetworkModal(false);
+                    }}
+                    className={`w-full p-4 rounded-sm flex items-center gap-4 transition-colors ${
+                      network === net
+                        ? "bg-accent/10 border border-accent"
+                        : "bg-input-bg border border-card-border hover:border-muted"
+                    }`}
+                  >
+                    <span
+                      className={`w-3 h-3 rounded-full ${
+                        network === net ? "bg-accent" : "bg-muted"
+                      }`}
+                    ></span>
+                    <span className="text-base font-medium">
+                      {net.charAt(0).toUpperCase() + net.slice(1)}
+                    </span>
+                    {network === net && (
+                      <svg
+                        className="w-5 h-5 text-accent ml-auto"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Account Switcher Modal */}
+        {showAccountSwitcher && wallet && (
+          <div
+            className="fixed inset-0 bg-black/80 flex items-end justify-center z-50"
+            onClick={() => {
+              setShowAccountSwitcher(false);
+              setError(null);
+            }}
+          >
+            <div
+              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold">Switch Account</h3>
+                <button
+                  onClick={() => {
+                    setShowAccountSwitcher(false);
+                    setError(null);
+                  }}
+                  className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                >
+                  <svg
+                    className="w-5 h-5 text-muted"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Current Account */}
+              <div className="mb-4">
+                <p className="text-xs text-muted mb-2 uppercase tracking-wider">
+                  Current Account
+                </p>
+                <div className="p-4 rounded-sm bg-accent/10 border border-accent">
+                  <div className="flex items-center gap-3">
+                    <PunkAvatar address={wallet.address} size={48} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">
+                        {wallet.credential.username || "Wallet"}
+                      </div>
+                      <div className="font-mono text-sm text-muted">
+                        {formatAddress(wallet.address)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(wallet.address);
+                        setSuccess("Address copied!");
+                        setTimeout(() => setSuccess(null), 2000);
+                      }}
+                      className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                      title="Copy address"
+                    >
+                      <svg
+                        className="w-4 h-4 text-muted"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        />
+                      </svg>
+                    </button>
+                    <svg
+                      className="w-5 h-5 text-accent"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Other Accounts */}
+              {storedWallets.filter((w) => w.address !== wallet.address)
+                .length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs text-muted mb-2 uppercase tracking-wider">
+                    Other Accounts
+                  </p>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {storedWallets
+                      .filter((w) => w.address !== wallet.address)
+                      .map((w, i) => (
+                        <div
+                          key={w.credentialId}
+                          className="p-4 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={async () => {
+                                setSwitchingWalletIndex(i);
+                                setError(null);
+                                try {
+                                  const walletData =
+                                    await authenticateWithWallet(w);
+                                  if (walletData) {
+                                    setWallet(walletData);
+                                    setShowAccountSwitcher(false);
+                                    setSuccess(`Switched to ${w.username}`);
+                                    setTimeout(() => setSuccess(null), 2000);
+                                  }
+                                  // If walletData is null, user likely cancelled - do nothing
+                                } catch {
+                                  // User cancelled or error occurred - silently ignore
+                                } finally {
+                                  setSwitchingWalletIndex(null);
+                                }
+                              }}
+                              disabled={switchingWalletIndex !== null}
+                              className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:opacity-50"
+                            >
+                              <PunkAvatar address={w.address} size={48} />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium truncate">
+                                  {w.username}
+                                </div>
+                                <div className="font-mono text-sm text-muted">
+                                  {formatAddress(w.address)}
+                                </div>
+                              </div>
+                            </button>
+                            <div className="text-right">
+                              {loadingBalances ? (
+                                <div className="text-sm text-muted">...</div>
+                              ) : (
+                                <>
+                                  <div className="font-semibold tabular-nums text-sm">
+                                    {parseFloat(
+                                      walletBalances[w.address] || "0"
+                                    ).toFixed(4)}
+                                  </div>
+                                  <div className="text-xs text-muted">ETH</div>
+                                </>
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(w.address);
+                                setSuccess("Address copied!");
+                                setTimeout(() => setSuccess(null), 2000);
+                              }}
+                              className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                              title="Copy address"
+                            >
+                              <svg
+                                className="w-4 h-4 text-muted"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                />
+                              </svg>
+                            </button>
+                            {switchingWalletIndex === i && (
+                              <svg
+                                className="w-5 h-5 animate-spin text-accent"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                  fill="none"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="space-y-2 pt-4 border-t border-card-border">
+                <button
+                  onClick={() => {
+                    setShowAccountSwitcher(false);
+                    handleReset();
+                  }}
+                  className="w-full p-4 rounded-sm bg-card-border hover:bg-muted/20 transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                    />
+                  </svg>
+                  Add or Recover Account
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Session Proposal Modal */}
         {sessionProposal && (
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
             <div className="bg-card-bg border border-card-border rounded-sm p-6 max-w-md w-full space-y-6 animate-fade-in">
               <div className="text-center space-y-4">
                 {sessionProposal.params.proposer.metadata.icons[0] && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
                   <img
                     src={sessionProposal.params.proposer.metadata.icons[0]}
                     alt=""
@@ -2396,20 +2755,13 @@ export default function WalletApp() {
             </div>
           </div>
         )}
-
-        {/* Footer */}
-        <div className="py-4 flex items-center justify-center gap-2">
-          <p className="text-xs text-muted">
-            Private keys secured by passkeys
-          </p>
-          <img
-            src="/BGLogo.svg"
-            alt="BG"
-            width={18}
-            height={16}
-          />
-        </div>
       </main>
+
+      {/* Footer - Fixed at bottom */}
+      <footer className="fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom">
+        <p className="text-xs text-muted">Private keys secured by passkeys</p>
+        <Image src="/BGLogo.svg" alt="BG" width={18} height={16} />
+      </footer>
     </div>
   );
 

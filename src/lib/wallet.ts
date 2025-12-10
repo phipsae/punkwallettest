@@ -9,18 +9,17 @@ import {
   type Chain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { mainnet, sepolia, arbitrum, base } from "viem/chains";
+import { mainnet, arbitrum, base } from "viem/chains";
 
 // Supported networks
 export const NETWORKS: Record<string, Chain> = {
   mainnet,
-  sepolia,
   arbitrum,
   base,
 };
 
-// Default to Sepolia for testing
-const DEFAULT_NETWORK = "sepolia";
+// Default to Base
+const DEFAULT_NETWORK = "base";
 
 // Alchemy API Key from environment
 const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
@@ -28,7 +27,6 @@ const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
 // RPC URLs - using Alchemy endpoints
 const RPC_URLS: Record<string, string> = {
   mainnet: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-  sepolia: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
@@ -161,12 +159,11 @@ export function getExplorerUrl(
 ): string {
   const explorers: Record<string, string> = {
     mainnet: "https://etherscan.io/tx/",
-    sepolia: "https://sepolia.etherscan.io/tx/",
     arbitrum: "https://arbiscan.io/tx/",
     base: "https://basescan.org/tx/",
   };
 
-  return `${explorers[networkId] || explorers.sepolia}${hash}`;
+  return `${explorers[networkId] || explorers.base}${hash}`;
 }
 
 // Get address explorer URL
@@ -176,10 +173,9 @@ export function getAddressExplorerUrl(
 ): string {
   const explorers: Record<string, string> = {
     mainnet: "https://etherscan.io/address/",
-    sepolia: "https://sepolia.etherscan.io/address/",
     arbitrum: "https://arbiscan.io/address/",
     base: "https://basescan.org/address/",
   };
 
-  return `${explorers[networkId] || explorers.sepolia}${address}`;
+  return `${explorers[networkId] || explorers.base}${address}`;
 }

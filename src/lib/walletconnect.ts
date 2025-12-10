@@ -3,7 +3,7 @@ import { WalletKit, WalletKitTypes } from "@reown/walletkit";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
 import { formatEther, type Hex, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia, mainnet, arbitrum, base } from "viem/chains";
+import { mainnet, arbitrum, base } from "viem/chains";
 
 // WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
 const PROJECT_ID =
@@ -12,7 +12,6 @@ const PROJECT_ID =
 // Supported chains
 const SUPPORTED_CHAINS = {
   "eip155:1": mainnet,
-  "eip155:11155111": sepolia,
   "eip155:42161": arbitrum,
   "eip155:8453": base,
 };
@@ -276,13 +275,12 @@ export async function handleSessionRequest(
         const chainIdToNetwork: Record<string, { name: string; chain: Chain }> =
           {
             "1": { name: "mainnet", chain: mainnet },
-            "11155111": { name: "sepolia", chain: sepolia },
             "42161": { name: "arbitrum", chain: arbitrum },
             "8453": { name: "base", chain: base },
           };
 
         const networkInfo =
-          chainIdToNetwork[chainId] || chainIdToNetwork["11155111"];
+          chainIdToNetwork[chainId] || chainIdToNetwork["8453"];
         const walletClient = createWalletClientForNetwork(
           privateKey,
           networkInfo.name

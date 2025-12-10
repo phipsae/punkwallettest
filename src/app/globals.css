@@ -142,6 +142,22 @@ input:focus {
   animation: fadeIn 0.2s ease-out forwards;
 }
 
+/* Slide up animation for bottom sheets */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.25s ease-out forwards;
+}
+
 /* Stagger animation delays */
 .delay-100 {
   animation-delay: 100ms;

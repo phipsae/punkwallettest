@@ -66,23 +66,6 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       logoURI: "https://assets.coingecko.com/coins/images/2518/small/weth.png",
     },
   ],
-  sepolia: [
-    // Sepolia testnet tokens - these are common test tokens
-    {
-      address: "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06",
-      symbol: "USDT",
-      name: "Test USDT",
-      decimals: 6,
-      logoURI: "https://assets.coingecko.com/coins/images/325/small/Tether.png",
-    },
-    {
-      address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-      symbol: "USDC",
-      name: "Test USDC",
-      decimals: 6,
-      logoURI: "https://assets.coingecko.com/coins/images/6319/small/usdc.png",
-    },
-  ],
   arbitrum: [
     {
       address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
@@ -176,7 +159,6 @@ const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
 // RPC URLs - same as wallet.ts
 const RPC_URLS: Record<string, string> = {
   mainnet: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-  sepolia: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
@@ -249,8 +231,8 @@ export function getTokensForNetwork(networkId: string): Token[] {
 
 // Create public client for a network
 function getPublicClient(networkId: string) {
-  const chain = NETWORKS[networkId] || NETWORKS["sepolia"];
-  const rpcUrl = RPC_URLS[networkId] || RPC_URLS["sepolia"];
+  const chain = NETWORKS[networkId] || NETWORKS["base"];
+  const rpcUrl = RPC_URLS[networkId] || RPC_URLS["base"];
 
   return createPublicClient({
     chain,
