@@ -1498,7 +1498,7 @@ export default function WalletApp() {
                   </label>
                   <input
                     type="text"
-                    placeholder="0x... or vitalik.eth"
+                    placeholder="0x... or atg.eth"
                     value={sendTo}
                     onChange={(e) => setSendTo(e.target.value)}
                     className={`w-full px-4 py-4 rounded-sm bg-input-bg border text-foreground placeholder-muted font-mono text-sm ${
