@@ -29,6 +29,11 @@ export interface PasskeyWallet {
   address: `0x${string}`;
 }
 
+export interface RecoveryResult {
+  wallet: PasskeyWallet;
+  alreadyExisted: boolean;
+}
+
 // Storage keys
 const CREDENTIAL_STORAGE_KEY = "punk_wallet_credential";
 const WALLETS_LIST_KEY = "punk_wallet_list";
@@ -245,9 +250,42 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
   }
 }
 
+// Extract username from userHandle (which contains "username-timestamp")
+function extractUsernameFromUserHandle(
+  userHandle: string | undefined
+): string | undefined {
+  if (!userHandle) return undefined;
+
+  try {
+    // userHandle is base64url encoded
+    const decoded = base64urlToString(userHandle);
+    // Format is "username-timestamp", we want just the username
+    // Find the last dash followed by a number (timestamp)
+    const lastDashIndex = decoded.lastIndexOf("-");
+    if (lastDashIndex > 0) {
+      const afterDash = decoded.substring(lastDashIndex + 1);
+      // Check if what's after the dash looks like a timestamp (all digits)
+      if (/^\d+$/.test(afterDash)) {
+        return decoded.substring(0, lastDashIndex);
+      }
+    }
+    // If no valid timestamp suffix found, return the whole decoded string
+    return decoded;
+  } catch {
+    return undefined;
+  }
+}
+
+// Convert base64url to string
+function base64urlToString(base64url: string): string {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  return atob(base64 + padding);
+}
+
 // Recover wallet using discoverable credentials
 // This lets the browser show ALL passkeys for this site
-export async function recoverWallet(): Promise<PasskeyWallet | null> {
+export async function recoverWallet(): Promise<RecoveryResult | null> {
   const challenge = generateChallenge();
 
   try {
@@ -266,42 +304,60 @@ export async function recoverWallet(): Promise<PasskeyWallet | null> {
     const credentialId = authResponse.id;
     const credentialIdHex = base64urlToHex(credentialId);
 
+    // Check if wallet already exists in local storage
+    const wallets = getStoredWallets();
+    const existingWallet = wallets.find((w) => w.credentialId === credentialId);
+    const alreadyExisted = !!existingWallet;
+
     // Derive private key deterministically from credential ID
     const privateKey = await derivePrivateKey(credentialIdHex);
     const { privateKeyToAccount } = await import("viem/accounts");
     const account = privateKeyToAccount(privateKey);
+
+    // Try to get username from multiple sources:
+    // 1. First try the passkey's userHandle (most reliable for cross-device recovery)
+    // 2. Fall back to local storage if available
+    let username: string | undefined;
+
+    // The userHandle in the auth response contains the user.id from registration
+    // which was set to "username-timestamp"
+    username = extractUsernameFromUserHandle(authResponse.response.userHandle);
+
+    // Fall back to checking local storage
+    if (!username && existingWallet) {
+      username = existingWallet.username;
+    }
 
     // Create credential object
     const credential: PasskeyCredential = {
       credentialId,
       credentialIdHex,
       publicKey: credentialIdHex,
-      createdAt: Date.now(),
+      createdAt: existingWallet?.createdAt || Date.now(),
+      username,
     };
-
-    // Check if this wallet is in our list, if so get the username
-    const wallets = getStoredWallets();
-    const existingWallet = wallets.find((w) => w.credentialId === credentialId);
-    if (existingWallet) {
-      credential.username = existingWallet.username;
-    }
 
     // Save as current credential
     localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
 
-    // Also save/update in wallets list
-    saveWalletToList({
-      credentialId,
-      credentialIdHex,
-      username: credential.username || "Recovered Wallet",
-      address: account.address,
-      createdAt: existingWallet?.createdAt || Date.now(),
-    });
+    // Only add to wallets list if it doesn't already exist
+    if (!alreadyExisted) {
+      saveWalletToList({
+        credentialId,
+        credentialIdHex,
+        username: username || "Recovered Wallet",
+        address: account.address,
+        createdAt: Date.now(),
+      });
+    }
 
     return {
-      credential,
-      privateKey,
-      address: account.address,
+      wallet: {
+        credential,
+        privateKey,
+        address: account.address,
+      },
+      alreadyExisted,
     };
   } catch (error) {
     console.error("Recovery failed:", error);
@@ -388,6 +444,29 @@ export function removeWalletFromList(credentialId: string): void {
   localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(filtered));
 }
 
+// Update wallet name in storage
+export function updateWalletName(credentialId: string, newName: string): void {
+  if (typeof window === "undefined") return;
+
+  // Update in wallets list
+  const wallets = getStoredWallets();
+  const walletIndex = wallets.findIndex((w) => w.credentialId === credentialId);
+  if (walletIndex >= 0) {
+    wallets[walletIndex].username = newName;
+    localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(wallets));
+  }
+
+  // Update current credential if it matches
+  const currentCredential = getStoredCredential();
+  if (currentCredential?.credentialId === credentialId) {
+    currentCredential.username = newName;
+    localStorage.setItem(
+      CREDENTIAL_STORAGE_KEY,
+      JSON.stringify(currentCredential)
+    );
+  }
+}
+
 // Delete account with passkey authentication
 // Requires re-authentication before deletion for security
 export async function deleteAccountWithAuth(
@@ -437,7 +516,10 @@ export async function deleteAccountWithAuth(
 const ENCRYPTED_KEYS_STORAGE_KEY = "punk_wallet_encrypted_keys";
 
 // Get stored encrypted private keys
-function getEncryptedKeys(): Record<string, { iv: string; ciphertext: string }> {
+function getEncryptedKeys(): Record<
+  string,
+  { iv: string; ciphertext: string }
+> {
   if (typeof window === "undefined") return {};
   const stored = localStorage.getItem(ENCRYPTED_KEYS_STORAGE_KEY);
   if (!stored) return {};
@@ -449,7 +531,11 @@ function getEncryptedKeys(): Record<string, { iv: string; ciphertext: string }> 
 }
 
 // Save encrypted private key
-function saveEncryptedKey(credentialId: string, iv: string, ciphertext: string): void {
+function saveEncryptedKey(
+  credentialId: string,
+  iv: string,
+  ciphertext: string
+): void {
   const keys = getEncryptedKeys();
   keys[credentialId] = { iv, ciphertext };
   localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
@@ -463,11 +549,15 @@ function removeEncryptedKey(credentialId: string): void {
 }
 
 // Derive an AES encryption key from the passkey credential ID
-async function deriveEncryptionKey(credentialIdHex: string): Promise<CryptoKey> {
+async function deriveEncryptionKey(
+  credentialIdHex: string
+): Promise<CryptoKey> {
   const credentialBytes = hexToBytes(credentialIdHex as `0x${string}`);
 
   // Use a different domain separator for encryption (different from wallet derivation)
-  const domainSeparator = new TextEncoder().encode("PunkWallet-Import-Encryption-v1");
+  const domainSeparator = new TextEncoder().encode(
+    "PunkWallet-Import-Encryption-v1"
+  );
   const combined = concat([domainSeparator, credentialBytes]);
 
   // Hash to get key material
@@ -488,7 +578,10 @@ async function deriveEncryptionKey(credentialIdHex: string): Promise<CryptoKey> 
 }
 
 // Encrypt private key using AES-GCM
-async function encryptPrivateKey(privateKey: string, encryptionKey: CryptoKey): Promise<{ iv: string; ciphertext: string }> {
+async function encryptPrivateKey(
+  privateKey: string,
+  encryptionKey: CryptoKey
+): Promise<{ iv: string; ciphertext: string }> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
   const data = encoder.encode(privateKey);
@@ -605,7 +698,10 @@ export async function importWalletFromPrivateKey(
     const encryptionKey = await deriveEncryptionKey(credentialIdHex);
 
     // Step 3: Encrypt the imported private key
-    const { iv, ciphertext } = await encryptPrivateKey(normalizedKey, encryptionKey);
+    const { iv, ciphertext } = await encryptPrivateKey(
+      normalizedKey,
+      encryptionKey
+    );
 
     // Step 4: Store the encrypted key
     saveEncryptedKey(credentialId, iv, ciphertext);
@@ -684,7 +780,9 @@ export async function unlockImportedWallet(
     }
 
     // Step 3: Derive the decryption key from credential ID
-    const encryptionKey = await deriveEncryptionKey(storedWallet.credentialIdHex);
+    const encryptionKey = await deriveEncryptionKey(
+      storedWallet.credentialIdHex
+    );
 
     // Step 4: Decrypt the private key
     const privateKey = await decryptPrivateKey(
