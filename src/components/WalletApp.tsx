@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
+import { Capacitor } from "@capacitor/core";
 import {
   registerPasskey,
   authenticateAndDeriveWallet,
@@ -12,6 +13,9 @@ import {
   getStoredWallets,
   authenticateWithWallet,
   deleteAccountWithAuth,
+  importWalletFromPrivateKey,
+  unlockImportedWallet,
+  isValidPrivateKey,
   type PasskeyWallet,
   type StoredWallet,
 } from "@/lib/passkey";
@@ -139,6 +143,13 @@ export default function WalletApp() {
   const [switchingWalletIndex, setSwitchingWalletIndex] = useState<
     number | null
   >(null);
+
+  // Import wallet state
+  const [showImportWallet, setShowImportWallet] = useState(false);
+  const [importPrivateKey, setImportPrivateKey] = useState("");
+  const [importUsername, setImportUsername] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [showImportKey, setShowImportKey] = useState(false);
 
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
@@ -585,7 +596,15 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const walletData = await authenticateWithWallet(walletInfo);
+      let walletData: PasskeyWallet | null = null;
+
+      // Use different unlock method for imported wallets
+      if (walletInfo.isImported) {
+        walletData = await unlockImportedWallet(walletInfo);
+      } else {
+        walletData = await authenticateWithWallet(walletInfo);
+      }
+
       if (walletData) {
         setWallet(walletData);
         setHasCredential(true);
@@ -597,6 +616,52 @@ export default function WalletApp() {
     } finally {
       setLoading(false);
       setSelectedWalletIndex(null);
+    }
+  };
+
+  // Import wallet from private key
+  const handleImportWallet = async () => {
+    if (!importPrivateKey.trim()) {
+      setError("Please enter a private key");
+      return;
+    }
+
+    if (!isValidPrivateKey(importPrivateKey)) {
+      setError("Invalid private key format. Must be 64 hex characters (with or without 0x prefix)");
+      return;
+    }
+
+    if (!importUsername.trim()) {
+      setError("Please enter a name for this wallet");
+      return;
+    }
+
+    setImporting(true);
+    setError(null);
+
+    try {
+      const walletData = await importWalletFromPrivateKey(importPrivateKey, importUsername);
+      if (walletData) {
+        setWallet(walletData);
+        setHasCredential(true);
+        // Reset import form
+        setShowImportWallet(false);
+        setImportPrivateKey("");
+        setImportUsername("");
+        setShowImportKey(false);
+        // Refresh the stored wallets list
+        const wallets = getStoredWallets();
+        setStoredWallets(wallets);
+        setView("wallet");
+        setSuccess("Wallet imported successfully!");
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        setError("Failed to import wallet. Please check the private key.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to import wallet");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -1048,28 +1113,193 @@ export default function WalletApp() {
                   </div>
                 </div>
 
-                <button
-                  onClick={handleRecoverWallet}
-                  disabled={loading}
-                  className="w-full py-4 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium disabled:opacity-50"
-                >
-                  <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleRecoverWallet}
+                    disabled={loading || importing}
+                    className="flex-1 py-4 px-4 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium disabled:opacity-50"
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      Recover
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowImportWallet(true)}
+                    disabled={loading || importing}
+                    className="flex-1 py-4 px-4 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium disabled:opacity-50"
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                        />
+                      </svg>
+                      Import
+                    </span>
+                  </button>
+                </div>
+
+                {/* Import Wallet Modal */}
+                {showImportWallet && (
+                  <div className="space-y-4 p-4 rounded-sm bg-input-bg border border-card-border animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">Import Private Key</h3>
+                      <button
+                        onClick={() => {
+                          setShowImportWallet(false);
+                          setImportPrivateKey("");
+                          setImportUsername("");
+                          setShowImportKey(false);
+                        }}
+                        className="p-1 rounded-sm hover:bg-card-border transition-colors"
+                      >
+                        <svg
+                          className="w-5 h-5 text-muted"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-sm bg-accent/10 border border-accent/30 flex items-start gap-2">
+                      <svg
+                        className="w-5 h-5 text-accent shrink-0 mt-0.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                        />
+                      </svg>
+                      <span className="text-xs text-muted">
+                        Your private key will be encrypted and secured with a passkey. You&apos;ll be prompted to create a passkey after clicking Import.
+                      </span>
+                    </div>
+
+                    <input
+                      type="text"
+                      placeholder="Wallet name"
+                      value={importUsername}
+                      onChange={(e) => setImportUsername(e.target.value)}
+                      className="w-full px-4 py-3 rounded-sm bg-background border border-card-border text-foreground placeholder-muted focus:border-accent transition-colors"
+                    />
+
+                    <div className="relative">
+                      <input
+                        type={showImportKey ? "text" : "password"}
+                        placeholder="Private key (0x... or raw hex)"
+                        value={importPrivateKey}
+                        onChange={(e) => setImportPrivateKey(e.target.value)}
+                        className="w-full px-4 py-3 pr-12 rounded-sm bg-background border border-card-border text-foreground placeholder-muted focus:border-accent transition-colors font-mono text-sm"
                       />
-                    </svg>
-                    Recover from Passkey
-                  </span>
-                </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowImportKey(!showImportKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-sm hover:bg-card-border transition-colors"
+                      >
+                        {showImportKey ? (
+                          <svg
+                            className="w-5 h-5 text-muted"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="w-5 h-5 text-muted"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={handleImportWallet}
+                      disabled={importing || !importPrivateKey.trim() || !importUsername.trim()}
+                      className="w-full py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background disabled:opacity-50"
+                    >
+                      {importing ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                              fill="none"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                          Importing...
+                        </span>
+                      ) : (
+                        "Import Wallet"
+                      )}
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2859,8 +3089,12 @@ export default function WalletApp() {
                                 setSwitchingWalletIndex(i);
                                 setError(null);
                                 try {
-                                  const walletData =
-                                    await authenticateWithWallet(w);
+                                  let walletData: PasskeyWallet | null = null;
+                                  if (w.isImported) {
+                                    walletData = await unlockImportedWallet(w);
+                                  } else {
+                                    walletData = await authenticateWithWallet(w);
+                                  }
                                   if (walletData) {
                                     setWallet(walletData);
                                     setShowAccountSwitcher(false);
@@ -3096,7 +3330,7 @@ export default function WalletApp() {
       </main>
 
       {/* Footer - Fixed at bottom */}
-      <footer className="fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom">
+      <footer className={`fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom ${!Capacitor.isNativePlatform() ? 'pb-6' : ''}`}>
         <p className="text-xs text-muted">Private keys secured by passkeys</p>
         <Image src="/BGLogo.svg" alt="BG" width={18} height={16} />
       </footer>

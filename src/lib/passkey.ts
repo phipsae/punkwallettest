@@ -11,6 +11,7 @@ export interface PasskeyCredential {
   publicKey: string;
   createdAt: number;
   username?: string;
+  isImported?: boolean; // true if wallet was imported via private key
 }
 
 export interface StoredWallet {
@@ -19,6 +20,7 @@ export interface StoredWallet {
   username: string;
   address: string;
   createdAt: number;
+  isImported?: boolean; // true if wallet was imported via private key
 }
 
 export interface PasskeyWallet {
@@ -109,7 +111,7 @@ export function getStoredWallets(): StoredWallet[] {
 }
 
 // Save wallet to the list
-function saveWalletToList(wallet: StoredWallet): void {
+export function saveWalletToList(wallet: StoredWallet): void {
   const wallets = getStoredWallets();
   // Check if already exists
   const existingIndex = wallets.findIndex(
@@ -394,7 +396,7 @@ export async function deleteAccountWithAuth(
   const challenge = generateChallenge();
 
   try {
-    // Require passkey authentication before deletion
+    // Require passkey authentication before deletion (for both regular and imported wallets)
     await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
@@ -419,9 +421,306 @@ export async function deleteAccountWithAuth(
       clearStoredCredential();
     }
 
+    // If imported wallet, also remove the encrypted key
+    if (storedWallet.isImported) {
+      removeEncryptedKey(storedWallet.credentialId);
+    }
+
     return true;
   } catch (error) {
     console.error("Delete authentication failed:", error);
     return false;
   }
+}
+
+// Storage key for encrypted imported wallet private keys
+const ENCRYPTED_KEYS_STORAGE_KEY = "punk_wallet_encrypted_keys";
+
+// Get stored encrypted private keys
+function getEncryptedKeys(): Record<string, { iv: string; ciphertext: string }> {
+  if (typeof window === "undefined") return {};
+  const stored = localStorage.getItem(ENCRYPTED_KEYS_STORAGE_KEY);
+  if (!stored) return {};
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return {};
+  }
+}
+
+// Save encrypted private key
+function saveEncryptedKey(credentialId: string, iv: string, ciphertext: string): void {
+  const keys = getEncryptedKeys();
+  keys[credentialId] = { iv, ciphertext };
+  localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
+}
+
+// Remove encrypted private key
+function removeEncryptedKey(credentialId: string): void {
+  const keys = getEncryptedKeys();
+  delete keys[credentialId];
+  localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
+}
+
+// Derive an AES encryption key from the passkey credential ID
+async function deriveEncryptionKey(credentialIdHex: string): Promise<CryptoKey> {
+  const credentialBytes = hexToBytes(credentialIdHex as `0x${string}`);
+
+  // Use a different domain separator for encryption (different from wallet derivation)
+  const domainSeparator = new TextEncoder().encode("PunkWallet-Import-Encryption-v1");
+  const combined = concat([domainSeparator, credentialBytes]);
+
+  // Hash to get key material
+  const keyMaterial = keccak256(combined);
+  const keyBytes = hexToBytes(keyMaterial);
+
+  // Convert to ArrayBuffer for crypto.subtle
+  const keyBuffer = new Uint8Array(keyBytes).buffer;
+
+  // Import as AES-GCM key
+  return await crypto.subtle.importKey(
+    "raw",
+    keyBuffer,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Encrypt private key using AES-GCM
+async function encryptPrivateKey(privateKey: string, encryptionKey: CryptoKey): Promise<{ iv: string; ciphertext: string }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoder = new TextEncoder();
+  const data = encoder.encode(privateKey);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    encryptionKey,
+    data
+  );
+
+  return {
+    iv: bufferToBase64url(iv.buffer as ArrayBuffer),
+    ciphertext: bufferToBase64url(ciphertext),
+  };
+}
+
+// Decrypt private key using AES-GCM
+async function decryptPrivateKey(
+  iv: string,
+  ciphertext: string,
+  encryptionKey: CryptoKey
+): Promise<string> {
+  // Convert base64url back to ArrayBuffer
+  const ivBytes = base64urlToArrayBuffer(iv);
+  const ciphertextBytes = base64urlToArrayBuffer(ciphertext);
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: ivBytes },
+    encryptionKey,
+    ciphertextBytes
+  );
+
+  const decoder = new TextDecoder();
+  return decoder.decode(decrypted);
+}
+
+// Convert base64url to ArrayBuffer
+function base64urlToArrayBuffer(base64url: string): ArrayBuffer {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(base64 + padding);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// Validate private key format
+export function isValidPrivateKey(key: string): boolean {
+  // Check if it's a valid hex string with 0x prefix and 64 hex chars (32 bytes)
+  const cleanKey = key.trim();
+  if (cleanKey.startsWith("0x")) {
+    return /^0x[a-fA-F0-9]{64}$/.test(cleanKey);
+  }
+  // Also accept without 0x prefix
+  return /^[a-fA-F0-9]{64}$/.test(cleanKey);
+}
+
+// Normalize private key to 0x format
+function normalizePrivateKey(key: string): `0x${string}` {
+  const cleanKey = key.trim();
+  if (cleanKey.startsWith("0x")) {
+    return cleanKey as `0x${string}`;
+  }
+  return `0x${cleanKey}`;
+}
+
+// Import wallet from private key - creates a passkey and encrypts the imported key
+export async function importWalletFromPrivateKey(
+  privateKey: string,
+  username: string
+): Promise<PasskeyWallet | null> {
+  try {
+    const normalizedKey = normalizePrivateKey(privateKey);
+    const { privateKeyToAccount } = await import("viem/accounts");
+    const account = privateKeyToAccount(normalizedKey);
+
+    // Step 1: Create a new passkey for this imported wallet
+    const challenge = generateChallenge();
+    const registrationResponse = await startRegistration({
+      optionsJSON: {
+        challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
+        rp: {
+          name: "Punk Wallet",
+          id: getPasskeyRpId(),
+        },
+        user: {
+          id: bufferToBase64url(
+            new TextEncoder().encode(`import-${account.address}-${Date.now()}`)
+              .buffer as ArrayBuffer
+          ),
+          name: `${username} (Imported)`,
+          displayName: `${username} (Imported)`,
+        },
+        pubKeyCredParams: [
+          { alg: -7, type: "public-key" },
+          { alg: -257, type: "public-key" },
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: "platform",
+          userVerification: "required",
+          residentKey: "required",
+        },
+        timeout: 60000,
+        attestation: "none",
+      },
+    });
+
+    const credentialId = registrationResponse.id;
+    const credentialIdHex = base64urlToHex(credentialId);
+
+    // Step 2: Derive encryption key from the passkey's credential ID
+    const encryptionKey = await deriveEncryptionKey(credentialIdHex);
+
+    // Step 3: Encrypt the imported private key
+    const { iv, ciphertext } = await encryptPrivateKey(normalizedKey, encryptionKey);
+
+    // Step 4: Store the encrypted key
+    saveEncryptedKey(credentialId, iv, ciphertext);
+
+    // Create credential object
+    const credential: PasskeyCredential = {
+      credentialId,
+      credentialIdHex,
+      publicKey: base64urlToHex(
+        registrationResponse.response.publicKey || credentialId
+      ),
+      createdAt: Date.now(),
+      username,
+      isImported: true,
+    };
+
+    // Save to wallets list
+    saveWalletToList({
+      credentialId,
+      credentialIdHex,
+      username,
+      address: account.address,
+      createdAt: credential.createdAt,
+      isImported: true,
+    });
+
+    // Store current credential
+    localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+
+    return {
+      credential,
+      privateKey: normalizedKey,
+      address: account.address,
+    };
+  } catch (error) {
+    console.error("Import wallet failed:", error);
+    return null;
+  }
+}
+
+// Unlock an imported wallet - requires passkey authentication to decrypt the key
+export async function unlockImportedWallet(
+  storedWallet: StoredWallet
+): Promise<PasskeyWallet | null> {
+  if (!storedWallet.isImported) {
+    console.error("Not an imported wallet");
+    return null;
+  }
+
+  const challenge = generateChallenge();
+
+  try {
+    // Step 1: Authenticate with the passkey
+    await startAuthentication({
+      optionsJSON: {
+        challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
+        rpId: getPasskeyRpId(),
+        allowCredentials: [
+          {
+            id: storedWallet.credentialId,
+            type: "public-key",
+          },
+        ],
+        userVerification: "required",
+        timeout: 60000,
+      },
+    });
+
+    // Step 2: Get the encrypted key
+    const encryptedKeys = getEncryptedKeys();
+    const encryptedData = encryptedKeys[storedWallet.credentialId];
+
+    if (!encryptedData) {
+      console.error("Encrypted key not found for imported wallet");
+      return null;
+    }
+
+    // Step 3: Derive the decryption key from credential ID
+    const encryptionKey = await deriveEncryptionKey(storedWallet.credentialIdHex);
+
+    // Step 4: Decrypt the private key
+    const privateKey = await decryptPrivateKey(
+      encryptedData.iv,
+      encryptedData.ciphertext,
+      encryptionKey
+    );
+
+    const { privateKeyToAccount } = await import("viem/accounts");
+    const account = privateKeyToAccount(privateKey as `0x${string}`);
+
+    const credential: PasskeyCredential = {
+      credentialId: storedWallet.credentialId,
+      credentialIdHex: storedWallet.credentialIdHex,
+      publicKey: storedWallet.credentialIdHex,
+      createdAt: storedWallet.createdAt,
+      username: storedWallet.username,
+      isImported: true,
+    };
+
+    // Save as current credential
+    localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+
+    return {
+      credential,
+      privateKey: privateKey as `0x${string}`,
+      address: account.address,
+    };
+  } catch (error) {
+    console.error("Unlock imported wallet failed:", error);
+    return null;
+  }
+}
+
+// Enhanced remove that also cleans up encrypted keys
+export function removeWalletFromListWithCleanup(credentialId: string): void {
+  removeWalletFromList(credentialId);
+  removeEncryptedKey(credentialId);
 }
