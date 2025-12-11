@@ -55,6 +55,7 @@ import {
   type SessionRequest,
   type ActiveSession,
 } from "@/lib/walletconnect";
+import { getETHPrice, formatUSD, calculateUSDValue } from "@/lib/price";
 
 type View =
   | "onboarding"
@@ -89,6 +90,8 @@ export default function WalletApp() {
   // Send form state
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
+  const [sendAmountUSD, setSendAmountUSD] = useState("");
+  const [isUSDMode, setIsUSDMode] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [selectedToken, setSelectedToken] = useState<Token | null>(null); // null = ETH
 
@@ -105,6 +108,9 @@ export default function WalletApp() {
   const [showAddToken, setShowAddToken] = useState(false);
   const [customTokenAddress, setCustomTokenAddress] = useState("");
   const [addingToken, setAddingToken] = useState(false);
+
+  // ETH Price state (from Uniswap V3)
+  const [ethPrice, setEthPrice] = useState<number>(0);
 
   // WalletConnect state
   const [wcUri, setWcUri] = useState("");
@@ -167,9 +173,8 @@ export default function WalletApp() {
     const wallets = getStoredWallets();
     setStoredWallets(wallets);
     fetchWalletBalances(wallets);
-    if (hasStored) {
-      setView("wallet");
-    }
+    // Keep on onboarding view - user needs to unlock with passkey first
+    // View switches to "wallet" only after successful unlock
   }, [fetchWalletBalances]);
 
   // Initialize WalletConnect when wallet is available
@@ -250,6 +255,25 @@ export default function WalletApp() {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  // Fetch ETH price from Uniswap V3 (mainnet only)
+  useEffect(() => {
+    const fetchPrice = async () => {
+      try {
+        const price = await getETHPrice();
+        setEthPrice(price);
+      } catch (err) {
+        console.error("Failed to fetch ETH price:", err);
+      }
+    };
+
+    // Fetch immediately
+    fetchPrice();
+
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchPrice, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Resolve ENS names when user types in send field
   useEffect(() => {
@@ -391,6 +415,8 @@ export default function WalletApp() {
         setTimeout(() => setSuccess(null), 3000);
         setSendTo("");
         setSendAmount("");
+        setSendAmountUSD("");
+        setIsUSDMode(false);
         setSelectedToken(null);
         setResolvedAddress(null);
         fetchBalance();
@@ -1246,6 +1272,11 @@ export default function WalletApp() {
                 {parseFloat(balance).toFixed(6)}
               </div>
               <div className="text-lg text-muted mt-1">ETH</div>
+              {ethPrice > 0 && (
+                <div className="text-xl text-accent font-semibold mt-2">
+                  {formatUSD(calculateUSDValue(balance, ethPrice))}
+                </div>
+              )}
             </div>
 
             {/* Action buttons */}
@@ -1583,35 +1614,104 @@ export default function WalletApp() {
                 </div>
 
                 <div>
-                  <label className="block text-sm text-muted mb-2">
-                    Amount ({selectedToken ? selectedToken.symbol : "ETH"})
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm text-muted">
+                      Amount
+                    </label>
+                    {/* USD/ETH Toggle - only for ETH, not tokens */}
+                    {!selectedToken && ethPrice > 0 && (
+                      <button
+                        onClick={() => {
+                          if (isUSDMode) {
+                            // Switching to ETH mode - convert USD to ETH
+                            if (sendAmountUSD && ethPrice > 0) {
+                              const ethValue = parseFloat(sendAmountUSD) / ethPrice;
+                              setSendAmount(ethValue > 0 ? ethValue.toFixed(8) : "");
+                            }
+                          } else {
+                            // Switching to USD mode - convert ETH to USD
+                            if (sendAmount && ethPrice > 0) {
+                              const usdValue = parseFloat(sendAmount) * ethPrice;
+                              setSendAmountUSD(usdValue > 0 ? usdValue.toFixed(2) : "");
+                            }
+                          }
+                          setIsUSDMode(!isUSDMode);
+                        }}
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-card-border hover:bg-muted/30 transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        </svg>
+                        {isUSDMode ? "USD → ETH" : "ETH → USD"}
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
+                    {/* Input prefix for currency symbol */}
+                    {!selectedToken && isUSDMode && (
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">$</span>
+                    )}
                     <input
                       type="number"
-                      placeholder="0.0"
-                      value={sendAmount}
-                      onChange={(e) => setSendAmount(e.target.value)}
-                      step="0.0001"
-                      min="0"
-                      className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted pr-16"
-                    />
-                    <button
-                      onClick={() => {
-                        if (selectedToken) {
-                          const tokenBal = tokenBalances.find(
-                            (tb) => tb.token.address === selectedToken.address
-                          );
-                          if (tokenBal) setSendAmount(tokenBal.balance);
+                      placeholder={isUSDMode && !selectedToken ? "0.00" : "0.0"}
+                      value={!selectedToken && isUSDMode ? sendAmountUSD : sendAmount}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (!selectedToken && isUSDMode) {
+                          setSendAmountUSD(value);
+                          // Auto-calculate ETH amount
+                          if (value && ethPrice > 0) {
+                            const ethValue = parseFloat(value) / ethPrice;
+                            setSendAmount(ethValue > 0 ? ethValue.toFixed(8) : "");
+                          } else {
+                            setSendAmount("");
+                          }
                         } else {
-                          setAmount(balance);
+                          setSendAmount(value);
+                          // Auto-calculate USD amount
+                          if (value && ethPrice > 0 && !selectedToken) {
+                            const usdValue = parseFloat(value) * ethPrice;
+                            setSendAmountUSD(usdValue > 0 ? usdValue.toFixed(2) : "");
+                          } else {
+                            setSendAmountUSD("");
+                          }
                         }
                       }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-accent hover:text-accent-light"
-                    >
-                      MAX
-                    </button>
+                      step={isUSDMode && !selectedToken ? "0.01" : "0.0001"}
+                      min="0"
+                      className={`w-full py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted pr-16 ${
+                        !selectedToken && isUSDMode ? "pl-8" : "px-4"
+                      }`}
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                      <span className="text-sm text-muted">
+                        {selectedToken ? selectedToken.symbol : (isUSDMode ? "USD" : "ETH")}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (selectedToken) {
+                            const tokenBal = tokenBalances.find(
+                              (tb) => tb.token.address === selectedToken.address
+                            );
+                            if (tokenBal) setSendAmount(tokenBal.balance);
+                          } else if (isUSDMode && ethPrice > 0) {
+                            const maxUSD = parseFloat(balance) * ethPrice;
+                            setSendAmountUSD(maxUSD.toFixed(2));
+                            setSendAmount(balance);
+                          } else {
+                            setSendAmount(balance);
+                            if (ethPrice > 0) {
+                              setSendAmountUSD((parseFloat(balance) * ethPrice).toFixed(2));
+                            }
+                          }
+                        }}
+                        className="text-sm text-accent hover:text-accent-light font-medium"
+                      >
+                        MAX
+                      </button>
+                    </div>
                   </div>
+                  {/* Balance display */}
                   <p className="text-sm text-muted mt-2">
                     Balance:{" "}
                     {selectedToken
@@ -1622,7 +1722,28 @@ export default function WalletApp() {
                         )
                       : parseFloat(balance).toFixed(6)}{" "}
                     {selectedToken ? selectedToken.symbol : "ETH"}
+                    {!selectedToken && ethPrice > 0 && (
+                      <span className="text-accent ml-1">
+                        ({formatUSD(calculateUSDValue(balance, ethPrice))})
+                      </span>
+                    )}
                   </p>
+                  {/* Conversion display - always visible, fixed height */}
+                  {!selectedToken && ethPrice > 0 && (
+                    <p className="text-sm h-5 mt-1">
+                      {sendAmount ? (
+                        <span className="text-accent">
+                          {isUSDMode ? (
+                            <>Sending: {parseFloat(sendAmount).toFixed(6)} ETH</>
+                          ) : (
+                            <>≈ {formatUSD(calculateUSDValue(sendAmount, ethPrice))}</>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-muted/50">—</span>
+                      )}
+                    </p>
+                  )}
                 </div>
 
                 <button
