@@ -17,7 +17,28 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Punk Wallet | Passkey-Secured Ethereum Wallet",
   description:
-    "A self-custodial Ethereum wallet secured by passkeys using EIP-7951",
+    "A self-custodial Ethereum wallet secured by passkeys. No seed phrases, just Face ID or Touch ID.",
+  openGraph: {
+    title: "Punk Wallet",
+    description:
+      "Self-custodial Ethereum wallet secured by passkeys. No seed phrases needed.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Punk Wallet - Passkey-secured Ethereum wallet",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Punk Wallet",
+    description:
+      "Self-custodial Ethereum wallet secured by passkeys. No seed phrases needed.",
+    images: ["/og-image.png"],
+  },
 };
 
 export const viewport: Viewport = {
