@@ -24,6 +24,9 @@ import dynamic from "next/dynamic";
 
 // Dynamic import for QR Scanner (uses camera APIs that aren't available during SSR)
 const QRScanner = dynamic(() => import("./QRScanner"), { ssr: false });
+const PaymentScanner = dynamic(() => import("./PaymentScanner"), {
+  ssr: false,
+});
 import {
   getBalance,
   sendETH,
@@ -100,6 +103,11 @@ export default function WalletApp() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [selectedToken, setSelectedToken] = useState<Token | null>(null); // null = ETH
 
+  // Receive form state
+  const [receiveAmount, setReceiveAmount] = useState("");
+  const [receiveToken, setReceiveToken] = useState<Token | null>(null); // null = ETH
+  const [showReceiveOptions, setShowReceiveOptions] = useState(false);
+
   // ENS resolution state
   const [resolvedAddress, setResolvedAddress] = useState<`0x${string}` | null>(
     null
@@ -128,6 +136,7 @@ export default function WalletApp() {
   );
   const [wcInitialized, setWcInitialized] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
+  const [showPaymentScanner, setShowPaymentScanner] = useState(false);
   const previousWalletAddress = useRef<string | null>(null);
 
   // Export private key state
@@ -627,7 +636,9 @@ export default function WalletApp() {
     }
 
     if (!isValidPrivateKey(importPrivateKey)) {
-      setError("Invalid private key format. Must be 64 hex characters (with or without 0x prefix)");
+      setError(
+        "Invalid private key format. Must be 64 hex characters (with or without 0x prefix)"
+      );
       return;
     }
 
@@ -640,7 +651,10 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const walletData = await importWalletFromPrivateKey(importPrivateKey, importUsername);
+      const walletData = await importWalletFromPrivateKey(
+        importPrivateKey,
+        importUsername
+      );
       if (walletData) {
         setWallet(walletData);
         setHasCredential(true);
@@ -702,6 +716,53 @@ export default function WalletApp() {
       setError(err instanceof Error ? err.message : "Failed to connect");
     } finally {
       setWcConnecting(false);
+    }
+  };
+
+  // Handle payment QR code scan result
+  const handlePaymentScan = (
+    address: string,
+    amount?: string,
+    tokenAddress?: string
+  ) => {
+    setShowPaymentScanner(false);
+    setSendTo(address);
+
+    if (tokenAddress) {
+      // Find the token in our list
+      const token = tokenBalances.find(
+        (tb) => tb.token.address.toLowerCase() === tokenAddress.toLowerCase()
+      );
+      if (token) {
+        setSelectedToken(token.token);
+        if (amount) {
+          // Convert from raw amount to human readable using token decimals
+          const decimals = token.token.decimals;
+          const amountBigInt = BigInt(amount);
+          const divisor = BigInt(10 ** decimals);
+          const wholePart = amountBigInt / divisor;
+          const fractionalPart = amountBigInt % divisor;
+          const fractionalStr = fractionalPart
+            .toString()
+            .padStart(decimals, "0");
+          const humanAmount = `${wholePart}.${fractionalStr}`.replace(
+            /\.?0+$/,
+            ""
+          );
+          setSendAmount(humanAmount || "0");
+        }
+      } else {
+        // Token not in our list, just set the amount as ETH
+        setSelectedToken(null);
+        if (amount) {
+          setSendAmount(amount);
+        }
+      }
+    } else {
+      setSelectedToken(null);
+      if (amount) {
+        setSendAmount(amount);
+      }
     }
   };
 
@@ -792,6 +853,52 @@ export default function WalletApp() {
     await navigator.clipboard.writeText(wallet.privateKey);
     setSuccess("Private key copied to clipboard!");
     setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Generate EIP-681 payment URI for receive QR code
+  const getPaymentUri = useCallback(() => {
+    if (!wallet) return "";
+
+    // Base: just the address (no amount specified)
+    if (!receiveAmount || parseFloat(receiveAmount) <= 0) {
+      return wallet.address;
+    }
+
+    const chainId = NETWORKS[network]?.id || 8453; // Default to Base
+
+    try {
+      if (receiveToken) {
+        // ERC-20 token: ethereum:tokenAddress@chainId/transfer?address=recipient&uint256=amount
+        const [whole, fraction = ""] = receiveAmount.split(".");
+        const decimals = receiveToken.decimals;
+        const paddedFraction = fraction
+          .padEnd(decimals, "0")
+          .slice(0, decimals);
+        const tokenAmount = BigInt(
+          (whole + paddedFraction).replace(/^0+/, "") || "0"
+        );
+
+        return `ethereum:${receiveToken.address}@${chainId}/transfer?address=${wallet.address}&uint256=${tokenAmount}`;
+      } else {
+        // ETH: ethereum:address@chainId?value=amountInWei
+        const [whole, fraction = ""] = receiveAmount.split(".");
+        const paddedFraction = fraction.padEnd(18, "0").slice(0, 18);
+        const weiString = whole + paddedFraction;
+        const amountInWei = BigInt(weiString.replace(/^0+/, "") || "0");
+
+        return `ethereum:${wallet.address}@${chainId}?value=${amountInWei}`;
+      }
+    } catch {
+      return wallet.address;
+    }
+  }, [wallet, receiveAmount, receiveToken, network]);
+
+  // Copy payment URI to clipboard
+  const copyPaymentUri = async () => {
+    const uri = getPaymentUri();
+    await navigator.clipboard.writeText(uri);
+    setSuccess(receiveAmount ? "Payment request copied!" : "Address copied!");
+    setTimeout(() => setSuccess(null), 2000);
   };
 
   // Show loading state until mounted to prevent hydration mismatch
@@ -1211,7 +1318,9 @@ export default function WalletApp() {
                         />
                       </svg>
                       <span className="text-xs text-muted">
-                        Your private key will be encrypted and secured with a passkey. You&apos;ll be prompted to create a passkey after clicking Import.
+                        Your private key will be encrypted and secured with a
+                        passkey. You&apos;ll be prompted to create a passkey
+                        after clicking Import.
                       </span>
                     </div>
 
@@ -1276,12 +1385,19 @@ export default function WalletApp() {
 
                     <button
                       onClick={handleImportWallet}
-                      disabled={importing || !importPrivateKey.trim() || !importUsername.trim()}
+                      disabled={
+                        importing ||
+                        !importPrivateKey.trim() ||
+                        !importUsername.trim()
+                      }
                       className="w-full py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background disabled:opacity-50"
                     >
                       {importing ? (
                         <span className="flex items-center justify-center gap-2">
-                          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <svg
+                            className="animate-spin h-5 w-5"
+                            viewBox="0 0 24 24"
+                          >
                             <circle
                               className="opacity-25"
                               cx="12"
@@ -1451,8 +1567,18 @@ export default function WalletApp() {
       {/* Toast Notifications - Fixed position */}
       {success && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-accent text-background text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
           </svg>
           {success}
         </div>
@@ -1460,23 +1586,42 @@ export default function WalletApp() {
 
       {error && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-error text-white text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2 max-w-[90vw]">
-          <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="w-5 h-5 shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
           <span className="truncate">{error}</span>
           <button
             onClick={() => setError(null)}
             className="ml-1 p-1 hover:bg-white/20 rounded-full shrink-0"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
       )}
 
       <main className="max-w-2xl mx-auto px-4 py-3 pb-16 space-y-4">
-
         {/* Balance Card */}
         {view === "wallet" && wallet && (
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
@@ -1797,19 +1942,40 @@ export default function WalletApp() {
                   <label className="block text-sm text-muted mb-2">
                     Recipient Address or ENS Name
                   </label>
-                  <input
-                    type="text"
-                    placeholder="0x... or atg.eth"
-                    value={sendTo}
-                    onChange={(e) => setSendTo(e.target.value)}
-                    className={`w-full px-4 py-4 rounded-sm bg-input-bg border text-foreground placeholder-muted font-mono text-sm ${
-                      resolvedAddress
-                        ? "border-accent"
-                        : ensError
-                        ? "border-error"
-                        : "border-card-border"
-                    }`}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="0x... or atg.eth"
+                      value={sendTo}
+                      onChange={(e) => setSendTo(e.target.value)}
+                      className={`flex-1 px-4 py-4 rounded-sm bg-input-bg border text-foreground placeholder-muted font-mono text-sm ${
+                        resolvedAddress
+                          ? "border-accent"
+                          : ensError
+                          ? "border-error"
+                          : "border-card-border"
+                      }`}
+                    />
+                    <button
+                      onClick={() => setShowPaymentScanner(true)}
+                      className="px-4 py-4 rounded-sm bg-input-bg border border-card-border hover:border-accent transition-colors"
+                      title="Scan QR code"
+                    >
+                      <svg
+                        className="w-5 h-5 text-muted"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                   {/* ENS Resolution Status */}
                   {resolvingENS && (
                     <div className="flex items-center gap-2 mt-2 text-sm text-muted">
@@ -1874,9 +2040,7 @@ export default function WalletApp() {
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm text-muted">
-                      Amount
-                    </label>
+                    <label className="text-sm text-muted">Amount</label>
                     {/* USD/ETH Toggle - only for ETH, not tokens */}
                     {!selectedToken && ethPrice > 0 && (
                       <button
@@ -1884,22 +2048,38 @@ export default function WalletApp() {
                           if (isUSDMode) {
                             // Switching to ETH mode - convert USD to ETH
                             if (sendAmountUSD && ethPrice > 0) {
-                              const ethValue = parseFloat(sendAmountUSD) / ethPrice;
-                              setSendAmount(ethValue > 0 ? ethValue.toFixed(8) : "");
+                              const ethValue =
+                                parseFloat(sendAmountUSD) / ethPrice;
+                              setSendAmount(
+                                ethValue > 0 ? ethValue.toFixed(8) : ""
+                              );
                             }
                           } else {
                             // Switching to USD mode - convert ETH to USD
                             if (sendAmount && ethPrice > 0) {
-                              const usdValue = parseFloat(sendAmount) * ethPrice;
-                              setSendAmountUSD(usdValue > 0 ? usdValue.toFixed(2) : "");
+                              const usdValue =
+                                parseFloat(sendAmount) * ethPrice;
+                              setSendAmountUSD(
+                                usdValue > 0 ? usdValue.toFixed(2) : ""
+                              );
                             }
                           }
                           setIsUSDMode(!isUSDMode);
                         }}
                         className="flex items-center gap-1 text-xs px-2 py-1 rounded-sm bg-card-border hover:bg-muted/30 transition-colors"
                       >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                          />
                         </svg>
                         {isUSDMode ? "USD → ETH" : "ETH → USD"}
                       </button>
@@ -1908,12 +2088,16 @@ export default function WalletApp() {
                   <div className="relative">
                     {/* Input prefix for currency symbol */}
                     {!selectedToken && isUSDMode && (
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">$</span>
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted">
+                        $
+                      </span>
                     )}
                     <input
                       type="number"
                       placeholder={isUSDMode && !selectedToken ? "0.00" : "0.0"}
-                      value={!selectedToken && isUSDMode ? sendAmountUSD : sendAmount}
+                      value={
+                        !selectedToken && isUSDMode ? sendAmountUSD : sendAmount
+                      }
                       onChange={(e) => {
                         const value = e.target.value;
                         if (!selectedToken && isUSDMode) {
@@ -1921,7 +2105,9 @@ export default function WalletApp() {
                           // Auto-calculate ETH amount
                           if (value && ethPrice > 0) {
                             const ethValue = parseFloat(value) / ethPrice;
-                            setSendAmount(ethValue > 0 ? ethValue.toFixed(8) : "");
+                            setSendAmount(
+                              ethValue > 0 ? ethValue.toFixed(8) : ""
+                            );
                           } else {
                             setSendAmount("");
                           }
@@ -1930,7 +2116,9 @@ export default function WalletApp() {
                           // Auto-calculate USD amount
                           if (value && ethPrice > 0 && !selectedToken) {
                             const usdValue = parseFloat(value) * ethPrice;
-                            setSendAmountUSD(usdValue > 0 ? usdValue.toFixed(2) : "");
+                            setSendAmountUSD(
+                              usdValue > 0 ? usdValue.toFixed(2) : ""
+                            );
                           } else {
                             setSendAmountUSD("");
                           }
@@ -1944,7 +2132,11 @@ export default function WalletApp() {
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                       <span className="text-sm text-muted">
-                        {selectedToken ? selectedToken.symbol : (isUSDMode ? "USD" : "ETH")}
+                        {selectedToken
+                          ? selectedToken.symbol
+                          : isUSDMode
+                          ? "USD"
+                          : "ETH"}
                       </span>
                       <button
                         onClick={() => {
@@ -1960,7 +2152,9 @@ export default function WalletApp() {
                           } else {
                             setSendAmount(balance);
                             if (ethPrice > 0) {
-                              setSendAmountUSD((parseFloat(balance) * ethPrice).toFixed(2));
+                              setSendAmountUSD(
+                                (parseFloat(balance) * ethPrice).toFixed(2)
+                              );
                             }
                           }
                         }}
@@ -1993,9 +2187,16 @@ export default function WalletApp() {
                       {sendAmount ? (
                         <span className="text-accent">
                           {isUSDMode ? (
-                            <>Sending: {parseFloat(sendAmount).toFixed(6)} ETH</>
+                            <>
+                              Sending: {parseFloat(sendAmount).toFixed(6)} ETH
+                            </>
                           ) : (
-                            <>≈ {formatUSD(calculateUSDValue(sendAmount, ethPrice))}</>
+                            <>
+                              ≈{" "}
+                              {formatUSD(
+                                calculateUSDValue(sendAmount, ethPrice)
+                              )}
+                            </>
                           )}
                         </span>
                       ) : (
@@ -2050,10 +2251,15 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold tracking-tight">
-                Receive ETH
+                Receive {receiveToken ? receiveToken.symbol : "ETH"}
               </h2>
               <button
-                onClick={() => setView("wallet")}
+                onClick={() => {
+                  setView("wallet");
+                  setReceiveAmount("");
+                  setReceiveToken(null);
+                  setShowReceiveOptions(false);
+                }}
                 className="p-2 rounded-sm hover:bg-card-border transition-colors"
               >
                 <svg
@@ -2085,7 +2291,7 @@ export default function WalletApp() {
               {/* QR Code */}
               <div className="inline-flex items-center justify-center bg-foreground rounded-sm p-4 mx-auto relative">
                 <QRCodeSVG
-                  value={wallet.address}
+                  value={getPaymentUri()}
                   size={180}
                   level="H"
                   includeMargin={false}
@@ -2098,6 +2304,156 @@ export default function WalletApp() {
                 </div>
               </div>
 
+              {/* Request info when amount is specified */}
+              {receiveAmount && parseFloat(receiveAmount) > 0 && (
+                <div className="p-3 bg-accent/10 border border-accent/30 rounded-sm">
+                  <p className="text-sm text-accent font-medium">
+                    Requesting {receiveAmount}{" "}
+                    {receiveToken ? receiveToken.symbol : "ETH"}
+                  </p>
+                  <p className="text-xs text-muted mt-1">
+                    Scanner will have this amount prefilled
+                  </p>
+                </div>
+              )}
+
+              {/* Collapsible Request Options */}
+              <div className="text-left">
+                <button
+                  onClick={() => setShowReceiveOptions(!showReceiveOptions)}
+                  className="w-full flex items-center justify-between p-3 bg-input-bg border border-card-border rounded-sm hover:border-muted transition-colors"
+                >
+                  <span className="text-sm font-medium text-muted">
+                    Request specific amount
+                  </span>
+                  <svg
+                    className={`w-5 h-5 text-muted transition-transform ${
+                      showReceiveOptions ? "rotate-180" : ""
+                    }`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+
+                {showReceiveOptions && (
+                  <div className="mt-3 space-y-4 p-4 bg-input-bg/50 border border-card-border rounded-sm">
+                    {/* Token Selection */}
+                    <div>
+                      <label className="block text-sm font-medium text-muted mb-2">
+                        Token
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {/* ETH option */}
+                        <button
+                          onClick={() => setReceiveToken(null)}
+                          className={`p-2 rounded-sm border transition-all ${
+                            receiveToken === null
+                              ? "bg-accent/10 border-accent"
+                              : "bg-input-bg border-card-border hover:border-muted"
+                          }`}
+                        >
+                          <div className="text-center">
+                            <div className="w-6 h-6 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
+                              <span className="text-xs font-bold text-accent">
+                                Ξ
+                              </span>
+                            </div>
+                            <div className="text-xs font-medium">ETH</div>
+                          </div>
+                        </button>
+                        {/* Token options */}
+                        {tokenBalances.slice(0, 7).map((tb) => (
+                          <button
+                            key={tb.token.address}
+                            onClick={() => setReceiveToken(tb.token)}
+                            className={`p-2 rounded-sm border transition-all ${
+                              receiveToken?.address === tb.token.address
+                                ? "bg-accent/10 border-accent"
+                                : "bg-input-bg border-card-border hover:border-muted"
+                            }`}
+                          >
+                            <div className="text-center">
+                              {tb.token.logoURI ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={tb.token.logoURI}
+                                  alt={tb.token.symbol}
+                                  className="w-6 h-6 rounded-sm mx-auto mb-1"
+                                  onError={(e) => {
+                                    (
+                                      e.target as HTMLImageElement
+                                    ).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
+                                  <span className="text-xs font-bold">
+                                    {tb.token.symbol.slice(0, 2)}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="text-xs font-medium truncate">
+                                {tb.token.symbol}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Amount Input */}
+                    <div>
+                      <label className="block text-sm font-medium text-muted mb-2">
+                        Amount
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={receiveAmount}
+                          onChange={(e) => setReceiveAmount(e.target.value)}
+                          placeholder="0.00"
+                          min="0"
+                          step="any"
+                          className="w-full px-4 py-3 bg-input-bg border border-card-border rounded-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors pr-16"
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted font-medium">
+                          {receiveToken ? receiveToken.symbol : "ETH"}
+                        </div>
+                      </div>
+                      {receiveAmount &&
+                        parseFloat(receiveAmount) > 0 &&
+                        !receiveToken &&
+                        ethPrice > 0 && (
+                          <p className="text-sm text-muted mt-1">
+                            ≈ {formatUSD(parseFloat(receiveAmount) * ethPrice)}
+                          </p>
+                        )}
+                    </div>
+
+                    {/* Clear button */}
+                    {(receiveAmount || receiveToken) && (
+                      <button
+                        onClick={() => {
+                          setReceiveAmount("");
+                          setReceiveToken(null);
+                        }}
+                        className="text-xs text-muted hover:text-foreground transition-colors"
+                      >
+                        Clear request
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <p className="text-muted text-sm mb-2">Your Address</p>
                 <div className="bg-input-bg border border-card-border rounded-sm p-4">
@@ -2108,7 +2464,7 @@ export default function WalletApp() {
               </div>
 
               <button
-                onClick={copyAddress}
+                onClick={copyPaymentUri}
                 className="py-3 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background inline-flex items-center gap-2"
               >
                 <svg
@@ -2124,7 +2480,9 @@ export default function WalletApp() {
                     d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                   />
                 </svg>
-                Copy Address
+                {receiveAmount && parseFloat(receiveAmount) > 0
+                  ? "Copy Payment Request"
+                  : "Copy Address"}
               </button>
 
               <p className="text-muted text-sm">
@@ -3098,7 +3456,9 @@ export default function WalletApp() {
                                   if (w.isImported) {
                                     walletData = await unlockImportedWallet(w);
                                   } else {
-                                    walletData = await authenticateWithWallet(w);
+                                    walletData = await authenticateWithWallet(
+                                      w
+                                    );
                                   }
                                   if (walletData) {
                                     setWallet(walletData);
@@ -3335,16 +3695,28 @@ export default function WalletApp() {
       </main>
 
       {/* Footer - Fixed at bottom */}
-      <footer className={`fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom ${!Capacitor.isNativePlatform() ? 'pb-6' : ''}`}>
+      <footer
+        className={`fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom ${
+          !Capacitor.isNativePlatform() ? "pb-6" : ""
+        }`}
+      >
         <p className="text-xs text-muted">Private keys secured by passkeys</p>
         <Image src="/BGLogo.svg" alt="BG" width={18} height={16} />
       </footer>
 
-      {/* QR Scanner Modal */}
+      {/* QR Scanner Modal (WalletConnect) */}
       {showQRScanner && (
         <QRScanner
           onScan={handleQRScan}
           onClose={() => setShowQRScanner(false)}
+        />
+      )}
+
+      {/* Payment Scanner Modal */}
+      {showPaymentScanner && (
+        <PaymentScanner
+          onScan={handlePaymentScan}
+          onClose={() => setShowPaymentScanner(false)}
         />
       )}
     </div>
