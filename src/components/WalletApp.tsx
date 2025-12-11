@@ -849,24 +849,29 @@ export default function WalletApp() {
                 viewBox="0 0 24 24"
                 className="punk-logo"
               >
+                {/* Green background */}
                 <rect width="24" height="24" fill="#84cc16" rx="1" />
-                {/* Punk face */}
-                <rect x="8" y="10" width="8" height="8" fill="#ffd8b1" />
-                <rect x="7" y="12" width="1" height="3" fill="#ffd8b1" />
-                <rect x="16" y="12" width="1" height="3" fill="#ffd8b1" />
-                <rect x="10" y="18" width="4" height="3" fill="#ffd8b1" />
-                {/* Eyes */}
-                <rect x="9" y="12" width="1" height="1" fill="#000" />
-                <rect x="14" y="12" width="1" height="1" fill="#000" />
-                {/* Mouth */}
-                <rect x="11" y="15" width="2" height="1" fill="#000" />
-                {/* Lime Mohawk */}
-                <rect x="11" y="3" width="2" height="7" fill="#65a30d" />
+                {/* Zombie skin face */}
+                <rect x="8" y="10" width="8" height="8" fill="#7fd8ff" />
+                <rect x="7" y="12" width="1" height="3" fill="#7fd8ff" />
+                <rect x="16" y="12" width="1" height="3" fill="#7fd8ff" />
+                <rect x="10" y="18" width="4" height="3" fill="#7fd8ff" />
+                {/* Nose */}
+                <rect x="11" y="13" width="2" height="2" fill="#7fd8ff" />
+                {/* Accent Green Mohawk */}
+                <rect x="11" y="3" width="2" height="5" fill="#65a30d" />
                 <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
                 {/* Sunglasses */}
-                <rect x="8" y="11" width="3" height="2" fill="#000" />
-                <rect x="13" y="11" width="3" height="2" fill="#000" />
-                <rect x="11" y="11" width="2" height="1" fill="#000" />
+                <rect x="8" y="12" width="3" height="1" fill="#000" />
+                <rect x="13" y="12" width="3" height="1" fill="#000" />
+                <rect x="11" y="12" width="2" height="1" fill="#000" />
+                {/* Mouth + Cigarette */}
+                <rect x="11" y="15" width="2" height="1" fill="#000" />
+                <rect x="13" y="15" width="2" height="1" fill="#fff" />
+                <rect x="15" y="15" width="1" height="1" fill="#ff6600" />
+                {/* Gold chain */}
+                <rect x="10" y="18" width="4" height="1" fill="#ffd700" />
+                <rect x="11" y="19" width="2" height="1" fill="#ffd700" />
               </svg>
             </div>
             <h1 className="text-4xl font-bold tracking-tight">
