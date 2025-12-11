@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -51,6 +51,7 @@ import {
   disconnectSession,
   handleSessionRequest,
   formatRequestDisplay,
+  updateSessionsAccount,
   type SessionProposal,
   type SessionRequest,
   type ActiveSession,
@@ -123,6 +124,7 @@ export default function WalletApp() {
   );
   const [wcInitialized, setWcInitialized] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
+  const previousWalletAddress = useRef<string | null>(null);
 
   // Export private key state
   const [showPrivateKey, setShowPrivateKey] = useState(false);
@@ -209,6 +211,28 @@ export default function WalletApp() {
     };
 
     init();
+  }, [wallet, wcInitialized]);
+
+  // Update WalletConnect sessions when wallet address changes
+  useEffect(() => {
+    if (!wallet || !wcInitialized) return;
+
+    const currentAddress = wallet.address;
+    const previousAddress = previousWalletAddress.current;
+
+    // Only emit accountsChanged if we're switching from one wallet to another
+    // (not on initial wallet load)
+    if (previousAddress && previousAddress !== currentAddress) {
+      console.log(
+        `Wallet switched from ${previousAddress} to ${currentAddress}, updating WalletConnect sessions...`
+      );
+      updateSessionsAccount(currentAddress).catch((err) => {
+        console.error("Failed to update WalletConnect sessions:", err);
+      });
+    }
+
+    // Update the ref for next comparison
+    previousWalletAddress.current = currentAddress;
   }, [wallet, wcInitialized]);
 
   // Fetch balance when wallet changes

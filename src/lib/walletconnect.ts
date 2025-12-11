@@ -209,6 +209,72 @@ export async function disconnectSession(topic: string): Promise<void> {
   });
 }
 
+// Update all sessions with a new account address (when switching wallets)
+export async function updateSessionsAccount(newAddress: string): Promise<void> {
+  const wk = await initWalletConnect();
+  const sessions = wk.getActiveSessions();
+
+  // Emit accountsChanged event to each active session
+  for (const session of Object.values(sessions)) {
+    // Get the chains this session is connected to
+    const chains = Object.keys(session.namespaces)
+      .flatMap((ns) => {
+        const namespace = session.namespaces[ns];
+        return namespace.chains || [];
+      })
+      .filter((chain) => chain.startsWith("eip155:"));
+
+    // Emit accountsChanged for each chain
+    for (const chainId of chains) {
+      try {
+        await wk.emitSessionEvent({
+          topic: session.topic,
+          event: {
+            name: "accountsChanged",
+            data: [`${chainId}:${newAddress}`],
+          },
+          chainId,
+        });
+        console.log(
+          `Emitted accountsChanged to ${session.peer.metadata.name} on ${chainId}`
+        );
+      } catch (error) {
+        console.error(
+          `Failed to emit accountsChanged to ${session.peer.metadata.name}:`,
+          error
+        );
+      }
+    }
+
+    // Also update the session namespaces with the new account
+    try {
+      const updatedNamespaces = { ...session.namespaces };
+      for (const ns of Object.keys(updatedNamespaces)) {
+        if (ns === "eip155" || ns.startsWith("eip155:")) {
+          const namespace = updatedNamespaces[ns];
+          // Update accounts to use new address
+          namespace.accounts = (namespace.chains || []).map(
+            (chain) => `${chain}:${newAddress}`
+          );
+        }
+      }
+
+      await wk.updateSession({
+        topic: session.topic,
+        namespaces: updatedNamespaces,
+      });
+      console.log(
+        `Updated session namespaces for ${session.peer.metadata.name}`
+      );
+    } catch (error) {
+      console.error(
+        `Failed to update session for ${session.peer.metadata.name}:`,
+        error
+      );
+    }
+  }
+}
+
 // Handle a session request (sign transaction, message, etc.)
 export async function handleSessionRequest(
   request: SessionRequest,
