@@ -130,6 +130,20 @@ export function saveWalletToList(wallet: StoredWallet): void {
   localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(wallets));
 }
 
+// Check if running on Mac (iOS app on Mac via Catalyst)
+export function isMacCatalystApp(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent;
+  const isMac = ua.includes("Macintosh") || ua.includes("Mac OS");
+  const isCapacitor =
+    (
+      window as unknown as {
+        Capacitor?: { isNativePlatform?: () => boolean };
+      }
+    )?.Capacitor?.isNativePlatform?.() ?? false;
+  return isMac && isCapacitor;
+}
+
 // Register a new passkey
 export async function registerPasskey(
   username: string

@@ -17,6 +17,7 @@ import {
   unlockImportedWallet,
   isValidPrivateKey,
   updateWalletName,
+  isMacCatalystApp,
   type PasskeyWallet,
   type StoredWallet,
 } from "@/lib/passkey";
@@ -991,6 +992,59 @@ export default function WalletApp() {
 
   // Render onboarding view
   if (view === "onboarding") {
+    const isMac = isMacCatalystApp();
+
+    // Show Mac warning screen
+    if (isMac) {
+      return (
+        <div className="min-h-screen gradient-bg flex flex-col items-center justify-center p-6 safe-area-all">
+          <div className="w-full max-w-md space-y-6 text-center">
+            {/* Warning icon */}
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/20 border border-amber-500/50">
+              <svg
+                className="w-10 h-10 text-amber-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+            </div>
+
+            <h1 className="text-2xl font-bold text-foreground">
+              Not Available on Mac
+            </h1>
+
+            <p className="text-muted">
+              Punk Wallet uses passkeys (Face ID / Touch ID) which are not
+              supported when running iOS apps on Mac.
+            </p>
+
+            <div className="p-4 rounded-sm bg-card-bg border border-card-border text-left space-y-3">
+              <p className="text-sm text-foreground font-medium">
+                Please use one of these options:
+              </p>
+              <ul className="text-sm text-muted space-y-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-accent">•</span>
+                  <span>Use Punk Wallet on your iPhone or iPad</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-accent">•</span>
+                  <span>Wait for a dedicated macOS app (coming soon)</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen gradient-bg flex flex-col p-4 safe-area-all relative">
         {/* BG Logo - upper right corner */}
