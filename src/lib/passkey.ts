@@ -131,9 +131,16 @@ export function saveWalletToList(wallet: StoredWallet): void {
 }
 
 // Check if running on Mac (iOS app on Mac via Catalyst)
+// This should NOT trigger on iPhone/iPad or in the iOS Simulator
 export function isMacCatalystApp(): boolean {
   if (typeof window === "undefined") return false;
   const ua = navigator.userAgent;
+
+  // Check if it's an iPhone or iPad (real device or simulator) - these are fine
+  const isIOS = ua.includes("iPhone") || ua.includes("iPad");
+  if (isIOS) return false;
+
+  // Check if running as Mac Catalyst (iOS app on Mac)
   const isMac = ua.includes("Macintosh") || ua.includes("Mac OS");
   const isCapacitor =
     (
@@ -141,6 +148,7 @@ export function isMacCatalystApp(): boolean {
         Capacitor?: { isNativePlatform?: () => boolean };
       }
     )?.Capacitor?.isNativePlatform?.() ?? false;
+
   return isMac && isCapacitor;
 }
 
