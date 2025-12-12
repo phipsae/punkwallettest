@@ -37,6 +37,7 @@ import {
   NETWORKS,
   isENSName,
   resolveENS,
+  getENSName,
 } from "@/lib/wallet";
 import {
   getAllTokenBalances,
@@ -115,6 +116,9 @@ export default function WalletApp() {
   );
   const [resolvingENS, setResolvingENS] = useState(false);
   const [ensError, setEnsError] = useState<string | null>(null);
+
+  // Wallet's own ENS name (reverse resolution)
+  const [walletEnsName, setWalletEnsName] = useState<string | null>(null);
 
   // Token state
   const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
@@ -361,6 +365,24 @@ export default function WalletApp() {
 
     return () => clearTimeout(timeoutId);
   }, [sendTo]);
+
+  // Fetch ENS name for current wallet (reverse resolution)
+  useEffect(() => {
+    setWalletEnsName(null);
+
+    if (!wallet) return;
+
+    const fetchEnsName = async () => {
+      try {
+        const name = await getENSName(wallet.address);
+        setWalletEnsName(name);
+      } catch {
+        // Silently fail - ENS name is optional
+      }
+    };
+
+    fetchEnsName();
+  }, [wallet?.address]);
 
   // Create new wallet
   const handleCreateWallet = async () => {
@@ -1487,7 +1509,7 @@ export default function WalletApp() {
                 />
                 <div className="flex flex-col items-start">
                   <span className="font-medium text-base flex items-center gap-1">
-                    {wallet.credential.username || "Wallet"}
+                    {walletEnsName || wallet.credential.username || "Wallet"}
                     <svg
                       className="w-3.5 h-3.5 text-muted"
                       fill="none"

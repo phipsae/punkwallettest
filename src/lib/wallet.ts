@@ -184,10 +184,15 @@ export function getAddressExplorerUrl(
 // Check if input looks like an ENS name
 export function isENSName(input: string): boolean {
   // ENS names end with .eth or other TLDs like .xyz, .com, etc.
-  // Most common is .eth
+  // Support subdomains like punk.austingriffith.eth
+  // Each label can contain alphanumeric and hyphens
   return (
-    /^[a-zA-Z0-9-]+\.eth$/i.test(input) ||
-    /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/i.test(input)
+    /^[a-zA-Z0-9][a-zA-Z0-9-]*(\.[a-zA-Z0-9][a-zA-Z0-9-]*)*\.eth$/i.test(
+      input
+    ) ||
+    /^[a-zA-Z0-9][a-zA-Z0-9-]*(\.[a-zA-Z0-9][a-zA-Z0-9-]*)*\.[a-zA-Z]{2,}$/i.test(
+      input
+    )
   );
 }
 
