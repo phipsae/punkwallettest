@@ -70,57 +70,120 @@ type EventCallback = {
 
 let walletKit: InstanceType<typeof WalletKit> | null = null;
 let eventCallbacks: EventCallback = {};
+let wcInitFailed = false;
 
-// Initialize WalletConnect
-export async function initWalletConnect(): Promise<
-  InstanceType<typeof WalletKit>
-> {
+// Check if IndexedDB is available and working (iOS 17 bug workaround)
+async function checkIndexedDBAvailable(): Promise<boolean> {
+  if (typeof indexedDB === "undefined") {
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const testDbName = "__wc_idb_test__";
+      const request = indexedDB.open(testDbName);
+
+      request.onerror = () => {
+        console.warn("IndexedDB test failed - not available");
+        resolve(false);
+      };
+
+      request.onsuccess = () => {
+        try {
+          request.result.close();
+          indexedDB.deleteDatabase(testDbName);
+          resolve(true);
+        } catch {
+          resolve(false);
+        }
+      };
+
+      // Timeout after 3 seconds (iOS can hang on IndexedDB)
+      setTimeout(() => {
+        console.warn("IndexedDB test timed out");
+        resolve(false);
+      }, 3000);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+// Check if WalletConnect is available (didn't fail to initialize)
+export function isWalletConnectAvailable(): boolean {
+  return !wcInitFailed;
+}
+
+// Initialize WalletConnect with iOS 17 IndexedDB protection
+export async function initWalletConnect(): Promise<InstanceType<
+  typeof WalletKit
+> | null> {
   if (walletKit) return walletKit;
+  if (wcInitFailed) return null;
 
-  const core = new Core({
-    projectId: PROJECT_ID,
-  });
-
-  walletKit = await WalletKit.init({
-    core,
-    metadata: {
-      name: "Punk Wallet",
-      description: "Self-custodial Ethereum wallet secured by passkeys",
-      url:
-        typeof window !== "undefined"
-          ? window.location.origin
-          : "https://punkwallet.io",
-      icons: ["https://avatars.githubusercontent.com/u/37784886"],
-    },
-  });
-
-  // Set up event listeners
-  walletKit.on("session_proposal", async (proposal) => {
-    console.log("Session proposal received:", proposal);
-    if (eventCallbacks.onSessionProposal) {
-      eventCallbacks.onSessionProposal({
-        id: proposal.id,
-        params: proposal.params,
-        verifyContext: proposal.verifyContext,
-      });
+  try {
+    // Test IndexedDB availability first (iOS 17 bug workaround)
+    const idbAvailable = await checkIndexedDBAvailable();
+    if (!idbAvailable) {
+      console.warn(
+        "IndexedDB not available - WalletConnect disabled (likely iOS 17 Lockdown Mode or IndexedDB bug)"
+      );
+      wcInitFailed = true;
+      return null;
     }
-  });
 
-  walletKit.on("session_request", async (request) => {
-    console.log("Session request received:", request);
-    if (eventCallbacks.onSessionRequest) {
-      eventCallbacks.onSessionRequest(request as SessionRequest);
-    }
-  });
+    const core = new Core({
+      projectId: PROJECT_ID,
+    });
 
-  walletKit.on("session_delete", async (event) => {
-    console.log("Session deleted:", event);
-    if (eventCallbacks.onSessionDelete) {
-      eventCallbacks.onSessionDelete(event.topic);
-    }
-  });
+    walletKit = await WalletKit.init({
+      core,
+      metadata: {
+        name: "Punk Wallet",
+        description: "Self-custodial Ethereum wallet secured by passkeys",
+        url:
+          typeof window !== "undefined"
+            ? window.location.origin
+            : "https://punkwallet.io",
+        icons: ["https://avatars.githubusercontent.com/u/37784886"],
+      },
+    });
 
-  return walletKit;
+    // Set up event listeners
+    walletKit.on("session_proposal", async (proposal) => {
+      console.log("Session proposal received:", proposal);
+      if (eventCallbacks.onSessionProposal) {
+        eventCallbacks.onSessionProposal({
+          id: proposal.id,
+          params: proposal.params,
+          verifyContext: proposal.verifyContext,
+        });
+      }
+    });
+
+    walletKit.on("session_request", async (request) => {
+      console.log("Session request received:", request);
+      if (eventCallbacks.onSessionRequest) {
+        eventCallbacks.onSessionRequest(request as SessionRequest);
+      }
+    });
+
+    walletKit.on("session_delete", async (event) => {
+      console.log("Session deleted:", event);
+      if (eventCallbacks.onSessionDelete) {
+        eventCallbacks.onSessionDelete(event.topic);
+      }
+    });
+
+    return walletKit;
+  } catch (err) {
+    console.error(
+      "WalletConnect initialization failed (likely iOS 17 IndexedDB issue):",
+      err
+    );
+    wcInitFailed = true;
+    return null;
+  }
 }
 
 // Set event callbacks
@@ -131,6 +194,7 @@ export function setEventCallbacks(callbacks: EventCallback) {
 // Connect to a dApp using WalletConnect URI
 export async function connectWithUri(uri: string): Promise<void> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   await wk.pair({ uri });
 }
 
@@ -141,6 +205,7 @@ export async function approveSession(
   address: string
 ): Promise<ActiveSession> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
 
   // Build namespaces based on what the dApp requested
   const namespaces = buildApprovedNamespaces({
@@ -177,6 +242,7 @@ export async function approveSession(
 // Reject a session proposal
 export async function rejectSession(proposalId: number): Promise<void> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   await wk.rejectSession({
     id: proposalId,
     reason: getSdkError("USER_REJECTED"),
@@ -186,6 +252,7 @@ export async function rejectSession(proposalId: number): Promise<void> {
 // Get all active sessions
 export async function getActiveSessions(): Promise<ActiveSession[]> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   const sessions = wk.getActiveSessions();
 
   return Object.values(sessions).map((session) => ({
@@ -203,6 +270,7 @@ export async function getActiveSessions(): Promise<ActiveSession[]> {
 // Disconnect a session
 export async function disconnectSession(topic: string): Promise<void> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   await wk.disconnectSession({
     topic,
     reason: getSdkError("USER_DISCONNECTED"),
@@ -212,6 +280,7 @@ export async function disconnectSession(topic: string): Promise<void> {
 // Update all sessions with a new account address (when switching wallets)
 export async function updateSessionsAccount(newAddress: string): Promise<void> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   const sessions = wk.getActiveSessions();
 
   // Emit accountsChanged event to each active session
@@ -282,6 +351,7 @@ export async function handleSessionRequest(
   approve: boolean
 ): Promise<string | null> {
   const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
   const { id, topic, params } = request;
   const { method, params: requestParams } = params.request;
 

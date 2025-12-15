@@ -130,18 +130,83 @@ export function saveWalletToList(wallet: StoredWallet): void {
   localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(wallets));
 }
 
+// Debug info for Mac detection
+export interface MacDetectionDebug {
+  userAgent: string;
+  platform: string;
+  maxTouchPoints: number;
+  isCapacitor: boolean;
+  isMac: boolean;
+  result: boolean;
+}
+
+export function getMacDetectionDebug(): MacDetectionDebug {
+  if (typeof window === "undefined") {
+    return {
+      userAgent: "SSR",
+      platform: "SSR",
+      maxTouchPoints: 0,
+      isCapacitor: false,
+      isMac: false,
+      result: false,
+    };
+  }
+
+  const ua = navigator.userAgent;
+  const platform = navigator.platform;
+  const maxTouchPoints = navigator.maxTouchPoints;
+  const isCapacitor =
+    (
+      window as unknown as {
+        Capacitor?: { isNativePlatform?: () => boolean };
+      }
+    )?.Capacitor?.isNativePlatform?.() ?? false;
+  const isMac =
+    ua.includes("Macintosh") ||
+    ua.includes("Mac OS") ||
+    platform.includes("Mac");
+
+  return {
+    userAgent: ua,
+    platform,
+    maxTouchPoints,
+    isCapacitor,
+    isMac,
+    result: isMacCatalystApp(),
+  };
+}
+
 // Check if running on Mac (iOS app on Mac via Catalyst)
 // This should NOT trigger on iPhone/iPad or in the iOS Simulator
 export function isMacCatalystApp(): boolean {
   if (typeof window === "undefined") return false;
+
   const ua = navigator.userAgent;
+  const platform = navigator.platform;
 
-  // Check if it's an iPhone or iPad (real device or simulator) - these are fine
-  const isIOS = ua.includes("iPhone") || ua.includes("iPad");
-  if (isIOS) return false;
+  // Check navigator.platform first - this is more reliable for simulators
+  // iOS devices and simulators report "iPad", "iPhone", or "iPod"
+  // Macs report "MacIntel" or similar
+  if (platform === "iPad" || platform === "iPhone" || platform === "iPod") {
+    return false;
+  }
 
-  // Check if running as Mac Catalyst (iOS app on Mac)
-  const isMac = ua.includes("Macintosh") || ua.includes("Mac OS");
+  // Also check user agent for iPhone/iPad strings
+  if (ua.includes("iPhone") || ua.includes("iPad")) {
+    return false;
+  }
+
+  // Check for multi-touch support - real iPads have multi-touch (>1 touch points)
+  // Mac Catalyst apps on Mac typically have 0 or 1 (trackpad)
+  if (navigator.maxTouchPoints > 1) {
+    return false;
+  }
+
+  // Now check if it's actually a Mac running Capacitor
+  const isMac =
+    ua.includes("Macintosh") ||
+    ua.includes("Mac OS") ||
+    platform.includes("Mac");
   const isCapacitor =
     (
       window as unknown as {

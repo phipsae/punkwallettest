@@ -62,6 +62,7 @@ import {
   handleSessionRequest,
   formatRequestDisplay,
   updateSessionsAccount,
+  isWalletConnectAvailable,
   type SessionProposal,
   type SessionRequest,
   type ActiveSession,
@@ -141,6 +142,7 @@ export default function WalletApp() {
     null
   );
   const [wcInitialized, setWcInitialized] = useState(false);
+  const [wcUnavailable, setWcUnavailable] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showPaymentScanner, setShowPaymentScanner] = useState(false);
   const previousWalletAddress = useRef<string | null>(null);
@@ -211,11 +213,20 @@ export default function WalletApp() {
 
   // Initialize WalletConnect when wallet is available
   useEffect(() => {
-    if (!wallet || wcInitialized) return;
+    if (!wallet || wcInitialized || wcUnavailable) return;
 
     const init = async () => {
       try {
-        await initWalletConnect();
+        const wk = await initWalletConnect();
+
+        // Check if WalletConnect initialization failed (iOS 17 IndexedDB issue)
+        if (!wk) {
+          console.warn(
+            "WalletConnect unavailable - likely iOS 17 IndexedDB issue"
+          );
+          setWcUnavailable(true);
+          return;
+        }
 
         // Set up event callbacks
         setEventCallbacks({
@@ -237,15 +248,16 @@ export default function WalletApp() {
         setWcInitialized(true);
       } catch (err) {
         console.error("Failed to initialize WalletConnect:", err);
+        setWcUnavailable(true);
       }
     };
 
     init();
-  }, [wallet, wcInitialized]);
+  }, [wallet, wcInitialized, wcUnavailable]);
 
   // Update WalletConnect sessions when wallet address changes
   useEffect(() => {
-    if (!wallet || !wcInitialized) return;
+    if (!wallet || !wcInitialized || wcUnavailable) return;
 
     const currentAddress = wallet.address;
     const previousAddress = previousWalletAddress.current;
@@ -263,7 +275,7 @@ export default function WalletApp() {
 
     // Update the ref for next comparison
     previousWalletAddress.current = currentAddress;
-  }, [wallet, wcInitialized]);
+  }, [wallet, wcInitialized, wcUnavailable]);
 
   // Fetch balance when wallet changes
   const fetchBalance = useCallback(async () => {
@@ -997,12 +1009,55 @@ export default function WalletApp() {
     // Show Mac warning screen
     if (isMac) {
       return (
-        <div className="min-h-screen gradient-bg flex flex-col items-center justify-center p-6 safe-area-all">
+        <div className="min-h-screen gradient-bg flex flex-col items-center justify-center p-6 safe-area-all relative">
+          {/* BG Logo - upper right corner */}
+          <div className="absolute top-4 right-4 safe-area-top">
+            <Image src="/BGLogo.svg" alt="BG" width={32} height={30} />
+          </div>
+
           <div className="w-full max-w-md space-y-6 text-center">
-            {/* Warning icon */}
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/20 border border-amber-500/50">
+            {/* Punk Wallet Logo */}
+            <div className="inline-block border border-card-border rounded-sm overflow-hidden opacity-50">
               <svg
-                className="w-10 h-10 text-amber-400"
+                width="80"
+                height="80"
+                viewBox="0 0 24 24"
+                className="punk-logo"
+              >
+                {/* Green background */}
+                <rect width="24" height="24" fill="#84cc16" rx="1" />
+                {/* Zombie skin face */}
+                <rect x="8" y="10" width="8" height="8" fill="#7fd8ff" />
+                <rect x="7" y="12" width="1" height="3" fill="#7fd8ff" />
+                <rect x="16" y="12" width="1" height="3" fill="#7fd8ff" />
+                <rect x="10" y="18" width="4" height="3" fill="#7fd8ff" />
+                {/* Nose */}
+                <rect x="11" y="13" width="2" height="2" fill="#7fd8ff" />
+                {/* Accent Green Mohawk */}
+                <rect x="11" y="3" width="2" height="5" fill="#65a30d" />
+                <rect x="10" y="8" width="4" height="2" fill="#65a30d" />
+                {/* Sunglasses */}
+                <rect x="8" y="12" width="3" height="1" fill="#000" />
+                <rect x="13" y="12" width="3" height="1" fill="#000" />
+                <rect x="11" y="12" width="2" height="1" fill="#000" />
+                {/* Mouth + Cigarette */}
+                <rect x="11" y="15" width="2" height="1" fill="#000" />
+                <rect x="13" y="15" width="2" height="1" fill="#fff" />
+                <rect x="15" y="15" width="1" height="1" fill="#ff6600" />
+                {/* Gold chain */}
+                <rect x="10" y="18" width="4" height="1" fill="#ffd700" />
+                <rect x="11" y="19" width="2" height="1" fill="#ffd700" />
+              </svg>
+            </div>
+
+            <h1 className="text-3xl font-bold tracking-tight">
+              <span className="text-accent">Punk</span> Wallet
+            </h1>
+
+            {/* Warning badge */}
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/30">
+              <svg
+                className="w-5 h-5 text-amber-400"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -1014,11 +1069,8 @@ export default function WalletApp() {
                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                 />
               </svg>
+              <span className="text-amber-400 font-medium">Not Available on Mac</span>
             </div>
-
-            <h1 className="text-2xl font-bold text-foreground">
-              Not Available on Mac
-            </h1>
 
             <p className="text-muted">
               Punk Wallet uses passkeys (Face ID / Touch ID) which are not
@@ -3088,11 +3140,42 @@ export default function WalletApp() {
               </button>
             </div>
 
+            {/* WalletConnect unavailable warning (iOS 17 IndexedDB issue) */}
+            {wcUnavailable && (
+              <div className="p-4 rounded-sm bg-amber-500/10 border border-amber-500/30">
+                <div className="flex items-start gap-3">
+                  <svg
+                    className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                  <div>
+                    <p className="text-amber-400 font-medium text-sm">
+                      WalletConnect Unavailable
+                    </p>
+                    <p className="text-muted text-sm mt-1">
+                      WalletConnect cannot initialize on this device. This is a
+                      known issue on iOS 17 with certain security settings. You
+                      can still send and receive funds normally.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4">
               {/* Scan QR Button - Primary Action */}
               <button
                 onClick={() => setShowQRScanner(true)}
-                disabled={wcConnecting}
+                disabled={wcConnecting || wcUnavailable}
                 className="w-full py-4 px-6 rounded-sm bg-accent hover:bg-accent-dark transition-all duration-150 font-medium text-background flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 <svg
@@ -3133,13 +3216,14 @@ export default function WalletApp() {
                   placeholder="wc:..."
                   value={wcUri}
                   onChange={(e) => setWcUri(e.target.value)}
-                  className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm"
+                  disabled={wcUnavailable}
+                  className="w-full px-4 py-4 rounded-sm bg-input-bg border border-card-border text-foreground placeholder-muted font-mono text-sm disabled:opacity-50"
                 />
               </div>
 
               <button
                 onClick={handleWcConnect}
-                disabled={wcConnecting || !wcUri.trim()}
+                disabled={wcConnecting || !wcUri.trim() || wcUnavailable}
                 className="w-full py-4 px-6 rounded-sm bg-punk-cyan hover:bg-punk-cyan/90 transition-all duration-150 font-medium text-background disabled:opacity-50"
               >
                 {wcConnecting ? (
