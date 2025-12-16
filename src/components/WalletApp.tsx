@@ -4354,8 +4354,8 @@ export default function WalletApp() {
 
       {/* Footer - Fixed at bottom */}
       <footer
-        className={`fixed bottom-0 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom ${
-          !Capacitor.isNativePlatform() ? "pb-6" : ""
+        className={`fixed bottom-4 left-0 right-0 py-3 flex items-center justify-center gap-2 bg-background/80 backdrop-blur-sm safe-area-bottom ${
+          !Capacitor.isNativePlatform() ? "pb-2" : ""
         }`}
       >
         <p className="text-xs text-muted">Private keys secured by passkeys</p>

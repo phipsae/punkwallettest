@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   // Static export for Capacitor iOS/Android builds
   output: 'export',
 
+  // Hide the Next.js dev indicator in bottom-left corner
+  devIndicators: false,
+
   // Empty turbopack config to satisfy Next.js 16 requirement
   turbopack: {},
 
