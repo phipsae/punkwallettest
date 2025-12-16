@@ -74,7 +74,13 @@ import {
   type SessionRequest,
   type ActiveSession,
 } from "@/lib/walletconnect";
-import { getETHPrice, formatUSD, calculateUSDValue, getNativeTokenPrice, getNativeTokenSymbol } from "@/lib/price";
+import {
+  getETHPrice,
+  formatUSD,
+  calculateUSDValue,
+  getNativeTokenPrice,
+  getNativeTokenSymbol,
+} from "@/lib/price";
 
 type View =
   | "onboarding"
@@ -513,7 +519,9 @@ export default function WalletApp() {
       if (result.success) {
         setTxHash(result.hash);
         setSuccess(
-          `${selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)} sent successfully!`
+          `${
+            selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)
+          } sent successfully!`
         );
         setTimeout(() => setSuccess(null), 3000);
         setSendTo("");
@@ -578,7 +586,12 @@ export default function WalletApp() {
 
   // Add custom network
   const handleAddCustomNetwork = async () => {
-    if (!customNetworkName.trim() || !customNetworkChainId.trim() || !customNetworkRpcUrl.trim() || !customNetworkSymbol.trim()) {
+    if (
+      !customNetworkName.trim() ||
+      !customNetworkChainId.trim() ||
+      !customNetworkRpcUrl.trim() ||
+      !customNetworkSymbol.trim()
+    ) {
       setError("Please fill in all required fields");
       return;
     }
@@ -618,7 +631,9 @@ export default function WalletApp() {
       // Verify chain ID matches
       const rpcChainId = parseInt(data.result, 16);
       if (rpcChainId !== chainId) {
-        throw new Error(`RPC chain ID (${rpcChainId}) doesn't match provided chain ID (${chainId})`);
+        throw new Error(
+          `RPC chain ID (${rpcChainId}) doesn't match provided chain ID (${chainId})`
+        );
       }
 
       const success = addCustomNetwork({
@@ -632,13 +647,32 @@ export default function WalletApp() {
 
       if (success) {
         setNetworkIds(getAllNetworkIds());
+        setNetwork(networkId); // Switch to the newly added network
         setShowAddNetwork(false);
+        setShowNetworkModal(false); // Close the modal
         setCustomNetworkName("");
         setCustomNetworkChainId("");
         setCustomNetworkRpcUrl("");
         setCustomNetworkSymbol("");
         setCustomNetworkExplorer("");
-        setSuccess(`Added ${customNetworkName}! Note: Reconnect WalletConnect sessions to use this network with dApps.`);
+
+        // Disconnect all WalletConnect sessions so they can reconnect with the new network
+        try {
+          const sessions = await getActiveSessions();
+          for (const session of sessions) {
+            await disconnectSession(session.topic);
+          }
+          if (sessions.length > 0) {
+            setActiveSessions([]);
+            setSuccess(
+              `Switched to ${customNetworkName}! WalletConnect sessions ended - pls reconnect.`
+            );
+          } else {
+            setSuccess(`Switched to ${customNetworkName}!`);
+          }
+        } catch {
+          setSuccess(`Switched to ${customNetworkName}!`);
+        }
         setTimeout(() => setSuccess(null), 5000);
       } else {
         setError("Network already exists or ID/Chain ID is taken");
@@ -1174,7 +1208,9 @@ export default function WalletApp() {
                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                 />
               </svg>
-              <span className="text-amber-400 font-medium">Not Available on Mac</span>
+              <span className="text-amber-400 font-medium">
+                Not Available on Mac
+              </span>
             </div>
 
             <p className="text-muted">
@@ -1370,7 +1406,9 @@ export default function WalletApp() {
                                       walletBalances[w.address] || "0"
                                     ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-muted">{getNativeTokenSymbol(network)}</div>
+                                  <div className="text-xs text-muted">
+                                    {getNativeTokenSymbol(network)}
+                                  </div>
                                 </>
                               )}
                             </div>
@@ -1830,9 +1868,9 @@ export default function WalletApp() {
       </header>
 
       {/* Main content */}
-      {/* Toast Notifications - Fixed position */}
+      {/* Toast Notifications - Fixed position, above modals */}
       {success && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-accent text-background text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 rounded-full bg-accent text-background text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2 max-w-[90vw] text-center">
           <svg
             className="w-5 h-5"
             fill="none"
@@ -1851,7 +1889,7 @@ export default function WalletApp() {
       )}
 
       {error && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-error text-white text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2 max-w-[90vw]">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 rounded-full bg-error text-white text-sm font-medium shadow-lg animate-fade-in flex items-center gap-2 max-w-[90vw]">
           <svg
             className="w-5 h-5 shrink-0"
             fill="none"
@@ -1951,7 +1989,9 @@ export default function WalletApp() {
               <div className="text-4xl font-bold tabular-nums tracking-tight pt-6">
                 {parseFloat(balance).toFixed(6)}
               </div>
-              <div className="text-lg text-muted mt-1">{getNativeTokenSymbol(network)}</div>
+              <div className="text-lg text-muted mt-1">
+                {getNativeTokenSymbol(network)}
+              </div>
               {nativeTokenPrice > 0 && (
                 <div className="text-xl text-accent font-semibold mt-2">
                   {formatUSD(calculateUSDValue(balance, nativeTokenPrice))}
@@ -2096,7 +2136,10 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold tracking-tight">
-                Send {selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}
+                Send{" "}
+                {selectedToken
+                  ? selectedToken.symbol
+                  : getNativeTokenSymbol(network)}
               </h2>
               <button
                 onClick={() => {
@@ -2167,10 +2210,14 @@ export default function WalletApp() {
                       <div className="text-center">
                         <div className="w-8 h-8 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
                           <span className="text-xs font-bold text-accent">
-                            {getNativeTokenSymbol(network) === "POL" ? "◆" : "Ξ"}
+                            {getNativeTokenSymbol(network) === "POL"
+                              ? "◆"
+                              : "Ξ"}
                           </span>
                         </div>
-                        <div className="text-xs font-medium">{getNativeTokenSymbol(network)}</div>
+                        <div className="text-xs font-medium">
+                          {getNativeTokenSymbol(network)}
+                        </div>
                       </div>
                     </button>
                     {tokenBalances
@@ -2380,7 +2427,8 @@ export default function WalletApp() {
                           setSendAmountUSD(value);
                           // Auto-calculate ETH amount
                           if (value && nativeTokenPrice > 0) {
-                            const ethValue = parseFloat(value) / nativeTokenPrice;
+                            const ethValue =
+                              parseFloat(value) / nativeTokenPrice;
                             setSendAmount(
                               ethValue > 0 ? ethValue.toFixed(8) : ""
                             );
@@ -2391,7 +2439,8 @@ export default function WalletApp() {
                           setSendAmount(value);
                           // Auto-calculate USD amount
                           if (value && nativeTokenPrice > 0 && !selectedToken) {
-                            const usdValue = parseFloat(value) * nativeTokenPrice;
+                            const usdValue =
+                              parseFloat(value) * nativeTokenPrice;
                             setSendAmountUSD(
                               usdValue > 0 ? usdValue.toFixed(2) : ""
                             );
@@ -2422,14 +2471,17 @@ export default function WalletApp() {
                             );
                             if (tokenBal) setSendAmount(tokenBal.balance);
                           } else if (isUSDMode && nativeTokenPrice > 0) {
-                            const maxUSD = parseFloat(balance) * nativeTokenPrice;
+                            const maxUSD =
+                              parseFloat(balance) * nativeTokenPrice;
                             setSendAmountUSD(maxUSD.toFixed(2));
                             setSendAmount(balance);
                           } else {
                             setSendAmount(balance);
                             if (nativeTokenPrice > 0) {
                               setSendAmountUSD(
-                                (parseFloat(balance) * nativeTokenPrice).toFixed(2)
+                                (
+                                  parseFloat(balance) * nativeTokenPrice
+                                ).toFixed(2)
                               );
                             }
                           }
@@ -2450,10 +2502,16 @@ export default function WalletApp() {
                           )?.balance || "0"
                         )
                       : parseFloat(balance).toFixed(6)}{" "}
-                    {selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}
+                    {selectedToken
+                      ? selectedToken.symbol
+                      : getNativeTokenSymbol(network)}
                     {!selectedToken && nativeTokenPrice > 0 && (
                       <span className="text-accent ml-1">
-                        ({formatUSD(calculateUSDValue(balance, nativeTokenPrice))})
+                        (
+                        {formatUSD(
+                          calculateUSDValue(balance, nativeTokenPrice)
+                        )}
+                        )
                       </span>
                     )}
                   </p>
@@ -2514,7 +2572,11 @@ export default function WalletApp() {
                       Signing & Sending...
                     </span>
                   ) : (
-                    `Send ${selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}`
+                    `Send ${
+                      selectedToken
+                        ? selectedToken.symbol
+                        : getNativeTokenSymbol(network)
+                    }`
                   )}
                 </button>
               </div>
@@ -2527,7 +2589,10 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold tracking-tight">
-                Receive {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
+                Receive{" "}
+                {receiveToken
+                  ? receiveToken.symbol
+                  : getNativeTokenSymbol(network)}
               </h2>
               <button
                 onClick={() => {
@@ -2585,7 +2650,9 @@ export default function WalletApp() {
                 <div className="p-3 bg-accent/10 border border-accent/30 rounded-sm">
                   <p className="text-sm text-accent font-medium">
                     Requesting {receiveAmount}{" "}
-                    {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
+                    {receiveToken
+                      ? receiveToken.symbol
+                      : getNativeTokenSymbol(network)}
                   </p>
                   <p className="text-xs text-muted mt-1">
                     Scanner will have this amount prefilled
@@ -2639,10 +2706,14 @@ export default function WalletApp() {
                           <div className="text-center">
                             <div className="w-6 h-6 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
                               <span className="text-xs font-bold text-accent">
-                                {getNativeTokenSymbol(network) === "POL" ? "◆" : "Ξ"}
+                                {getNativeTokenSymbol(network) === "POL"
+                                  ? "◆"
+                                  : "Ξ"}
                               </span>
                             </div>
-                            <div className="text-xs font-medium">{getNativeTokenSymbol(network)}</div>
+                            <div className="text-xs font-medium">
+                              {getNativeTokenSymbol(network)}
+                            </div>
                           </div>
                         </button>
                         {/* Token options */}
@@ -2701,7 +2772,9 @@ export default function WalletApp() {
                           className="w-full px-4 py-3 bg-input-bg border border-card-border rounded-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors pr-16"
                         />
                         <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted font-medium">
-                          {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
+                          {receiveToken
+                            ? receiveToken.symbol
+                            : getNativeTokenSymbol(network)}
                         </div>
                       </div>
                       {receiveAmount &&
@@ -2709,7 +2782,10 @@ export default function WalletApp() {
                         !receiveToken &&
                         nativeTokenPrice > 0 && (
                           <p className="text-sm text-muted mt-1">
-                            ≈ {formatUSD(parseFloat(receiveAmount) * nativeTokenPrice)}
+                            ≈{" "}
+                            {formatUSD(
+                              parseFloat(receiveAmount) * nativeTokenPrice
+                            )}
                           </p>
                         )}
                     </div>
@@ -3516,8 +3592,7 @@ export default function WalletApp() {
             {/* Token List */}
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted">
-                All Tokens on{" "}
-                {getNetworkInfo(network).name}
+                All Tokens on {getNetworkInfo(network).name}
               </h3>
 
               {loadingTokens ? (
@@ -3658,8 +3733,18 @@ export default function WalletApp() {
                       onClick={() => setShowAddNetwork(true)}
                       className="px-3 py-1.5 rounded-sm text-sm font-medium transition-colors bg-accent/10 border border-accent text-accent hover:bg-accent/20 flex items-center gap-1.5"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 4v16m8-8H4"
+                        />
                       </svg>
                       Add
                     </button>
@@ -3684,7 +3769,11 @@ export default function WalletApp() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d={showAddNetwork ? "M10 19l-7-7m0 0l7-7m-7 7h18" : "M6 18L18 6M6 6l12 12"}
+                        d={
+                          showAddNetwork
+                            ? "M10 19l-7-7m0 0l7-7m-7 7h18"
+                            : "M6 18L18 6M6 6l12 12"
+                        }
                       />
                     </svg>
                   </button>
@@ -3755,21 +3844,52 @@ export default function WalletApp() {
                   </div>
                   <button
                     onClick={handleAddCustomNetwork}
-                    disabled={addingNetwork || !customNetworkName || !customNetworkChainId || !customNetworkRpcUrl || !customNetworkSymbol}
+                    disabled={
+                      addingNetwork ||
+                      !customNetworkName ||
+                      !customNetworkChainId ||
+                      !customNetworkRpcUrl ||
+                      !customNetworkSymbol
+                    }
                     className="w-full p-4 rounded-sm font-medium transition-colors bg-accent hover:bg-accent-light text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {addingNetwork ? (
                       <>
-                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        <svg
+                          className="w-5 h-5 animate-spin"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
                         </svg>
                         Verifying...
                       </>
                     ) : (
                       <>
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4v16m8-8H4"
+                          />
                         </svg>
                         Add Network
                       </>
@@ -3805,7 +3925,9 @@ export default function WalletApp() {
                           ) : (
                             <span
                               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                                network === net ? "bg-accent text-white" : "bg-muted/30 text-muted"
+                                network === net
+                                  ? "bg-accent text-white"
+                                  : "bg-muted/30 text-muted"
                               }`}
                             >
                               {netInfo.name.charAt(0)}
@@ -4030,7 +4152,9 @@ export default function WalletApp() {
                                       walletBalances[w.address] || "0"
                                     ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-muted">{getNativeTokenSymbol(network)}</div>
+                                  <div className="text-xs text-muted">
+                                    {getNativeTokenSymbol(network)}
+                                  </div>
                                 </>
                               )}
                             </div>
