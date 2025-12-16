@@ -452,3 +452,109 @@ export async function getENSName(
     return null;
   }
 }
+
+// Get ENS avatar for an address
+export async function getENSAvatar(
+  address: `0x${string}`
+): Promise<string | null> {
+  const mainnetClient = createPublicClient({
+    chain: mainnet,
+    transport: http(DEFAULT_RPC_URLS.mainnet),
+  });
+
+  try {
+    // First get the ENS name
+    const name = await mainnetClient.getEnsName({
+      address,
+    });
+
+    if (!name) {
+      return null;
+    }
+
+    // Then get the avatar for that name
+    const avatar = await mainnetClient.getEnsAvatar({
+      name: normalize(name),
+    });
+
+    return avatar;
+  } catch (error) {
+    console.error("ENS avatar resolution failed:", error);
+    return null;
+  }
+}
+
+// Storage key for ENS avatar preferences and cache
+const ENS_AVATAR_PREFS_KEY = "punk_wallet_ens_avatar_prefs";
+const ENS_AVATAR_CACHE_KEY = "punk_wallet_ens_avatar_cache";
+
+// Get ENS avatar preference for an address
+export function getENSAvatarPreference(address: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const stored = localStorage.getItem(ENS_AVATAR_PREFS_KEY);
+    if (!stored) return false;
+    const prefs: Record<string, boolean> = JSON.parse(stored);
+    return prefs[address.toLowerCase()] ?? false;
+  } catch {
+    return false;
+  }
+}
+
+// Set ENS avatar preference for an address
+export function setENSAvatarPreference(address: string, enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = localStorage.getItem(ENS_AVATAR_PREFS_KEY);
+    const prefs: Record<string, boolean> = stored ? JSON.parse(stored) : {};
+    prefs[address.toLowerCase()] = enabled;
+    localStorage.setItem(ENS_AVATAR_PREFS_KEY, JSON.stringify(prefs));
+  } catch (error) {
+    console.error("Failed to save ENS avatar preference:", error);
+  }
+}
+
+// Cache ENS avatar URL for an address
+export function cacheENSAvatar(address: string, avatarUrl: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = localStorage.getItem(ENS_AVATAR_CACHE_KEY);
+    const cache: Record<string, { url: string | null; timestamp: number }> = stored ? JSON.parse(stored) : {};
+    cache[address.toLowerCase()] = {
+      url: avatarUrl,
+      timestamp: Date.now(),
+    };
+    localStorage.setItem(ENS_AVATAR_CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    console.error("Failed to cache ENS avatar:", error);
+  }
+}
+
+// Get cached ENS avatar URL for an address (cache valid for 24 hours)
+export function getCachedENSAvatar(address: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = localStorage.getItem(ENS_AVATAR_CACHE_KEY);
+    if (!stored) return null;
+    const cache: Record<string, { url: string | null; timestamp: number }> = JSON.parse(stored);
+    const entry = cache[address.toLowerCase()];
+    if (!entry) return null;
+
+    // Cache valid for 24 hours
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    if (Date.now() - entry.timestamp > ONE_DAY) {
+      return null; // Cache expired, will refetch
+    }
+
+    return entry.url;
+  } catch {
+    return null;
+  }
+}
+
+// Get ENS avatar data for display (combines preference and cached URL)
+export function getENSAvatarForDisplay(address: string): { enabled: boolean; url: string | null } {
+  const enabled = getENSAvatarPreference(address);
+  const url = getCachedENSAvatar(address);
+  return { enabled, url };
+}

@@ -39,6 +39,12 @@ import {
   isENSName,
   resolveENS,
   getENSName,
+  getENSAvatar,
+  getENSAvatarPreference,
+  setENSAvatarPreference,
+  cacheENSAvatar,
+  getCachedENSAvatar,
+  getENSAvatarForDisplay,
   getAllNetworks,
   getCustomNetworks,
   addCustomNetwork,
@@ -134,6 +140,11 @@ export default function WalletApp() {
 
   // Wallet's own ENS name (reverse resolution)
   const [walletEnsName, setWalletEnsName] = useState<string | null>(null);
+
+  // ENS avatar state
+  const [ensAvatarUrl, setEnsAvatarUrl] = useState<string | null>(null);
+  const [useEnsAvatar, setUseEnsAvatar] = useState(false);
+  const [loadingEnsAvatar, setLoadingEnsAvatar] = useState(false);
 
   // Token state
   const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
@@ -406,22 +417,47 @@ export default function WalletApp() {
     return () => clearTimeout(timeoutId);
   }, [sendTo]);
 
-  // Fetch ENS name for current wallet (reverse resolution)
+  // Fetch ENS name and avatar for current wallet (reverse resolution)
   useEffect(() => {
     setWalletEnsName(null);
+    setEnsAvatarUrl(null);
 
     if (!wallet) return;
 
-    const fetchEnsName = async () => {
+    // Load ENS avatar preference from storage
+    const savedPref = getENSAvatarPreference(wallet.address);
+    setUseEnsAvatar(savedPref);
+
+    // Check for cached avatar first
+    const cachedAvatar = getCachedENSAvatar(wallet.address);
+    if (cachedAvatar) {
+      setEnsAvatarUrl(cachedAvatar);
+    }
+
+    const fetchEnsData = async () => {
       try {
         const name = await getENSName(wallet.address);
         setWalletEnsName(name);
+
+        // If user has ENS name, fetch avatar (even if cached, to update cache)
+        if (name) {
+          // Only show loading if we don't have a cached avatar
+          if (!cachedAvatar) {
+            setLoadingEnsAvatar(true);
+          }
+          const avatar = await getENSAvatar(wallet.address);
+          setEnsAvatarUrl(avatar);
+          // Cache the result (even if null)
+          cacheENSAvatar(wallet.address, avatar);
+          setLoadingEnsAvatar(false);
+        }
       } catch {
-        // Silently fail - ENS name is optional
+        // Silently fail - ENS name/avatar is optional
+        setLoadingEnsAvatar(false);
       }
     };
 
-    fetchEnsName();
+    fetchEnsData();
   }, [wallet?.address]);
 
   // Create new wallet
@@ -792,6 +828,13 @@ export default function WalletApp() {
     setIsEditingName(false);
     setSuccess("Wallet renamed successfully!");
     setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Toggle ENS avatar preference
+  const handleToggleEnsAvatar = (enabled: boolean) => {
+    if (!wallet) return;
+    setUseEnsAvatar(enabled);
+    setENSAvatarPreference(wallet.address, enabled);
   };
 
   // Recover wallet using discoverable credentials
@@ -1432,76 +1475,89 @@ export default function WalletApp() {
                     </div>
 
                     <div className="space-y-2 max-h-72 overflow-y-auto">
-                      {storedWallets.map((w, i) => (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            setSelectedWalletIndex(i);
-                            handleSelectWallet(w);
-                          }}
-                          disabled={loading}
-                          className={`w-full p-4 rounded-sm border transition-all duration-150 text-left disabled:opacity-50 ${
-                            selectedWalletIndex === i
-                              ? "bg-accent/10 border-accent"
-                              : "bg-input-bg border-card-border hover:border-muted"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <PunkAvatar address={w.address} size={48} />
-                              <div>
-                                <div className="font-medium">{w.username}</div>
-                                <div className="font-mono text-xs text-muted">
-                                  {w.address.slice(0, 6)}...
-                                  {w.address.slice(-4)}
+                      {storedWallets.map((w, i) => {
+                        const ensData = getENSAvatarForDisplay(w.address);
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => {
+                              setSelectedWalletIndex(i);
+                              handleSelectWallet(w);
+                            }}
+                            disabled={loading}
+                            className={`w-full p-4 rounded-sm border transition-all duration-150 text-left disabled:opacity-50 ${
+                              selectedWalletIndex === i
+                                ? "bg-accent/10 border-accent"
+                                : "bg-input-bg border-card-border hover:border-muted"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                {ensData.enabled && ensData.url ? (
+                                  <img
+                                    src={ensData.url}
+                                    alt="ENS Avatar"
+                                    className="w-12 h-12 rounded-sm object-cover"
+                                  />
+                                ) : (
+                                  <PunkAvatar address={w.address} size={48} />
+                                )}
+                                <div>
+                                  <div className="font-medium">
+                                    {w.username}
+                                  </div>
+                                  <div className="font-mono text-xs text-muted">
+                                    {w.address.slice(0, 6)}...
+                                    {w.address.slice(-4)}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="text-right">
-                              {loadingBalances ? (
-                                <div className="text-sm text-muted">
-                                  Loading...
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="font-semibold tabular-nums">
-                                    {parseFloat(
-                                      walletBalances[w.address] || "0"
-                                    ).toFixed(4)}
+                              <div className="text-right">
+                                {loadingBalances ? (
+                                  <div className="text-sm text-muted">
+                                    Loading...
                                   </div>
-                                  <div className="text-xs text-muted">
-                                    {getNativeTokenSymbol(network)}
-                                  </div>
-                                </>
-                              )}
+                                ) : (
+                                  <>
+                                    <div className="font-semibold tabular-nums">
+                                      {parseFloat(
+                                        walletBalances[w.address] || "0"
+                                      ).toFixed(4)}
+                                    </div>
+                                    <div className="text-xs text-muted">
+                                      {getNativeTokenSymbol(network)}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          {selectedWalletIndex === i && loading && (
-                            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-accent">
-                              <svg
-                                className="animate-spin h-4 w-4"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                  fill="none"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                />
-                              </svg>
-                              Authenticating with passkey...
-                            </div>
-                          )}
-                        </button>
-                      ))}
+                            {selectedWalletIndex === i && loading && (
+                              <div className="mt-3 flex items-center justify-center gap-2 text-sm text-accent">
+                                <svg
+                                  className="animate-spin h-4 w-4"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                    fill="none"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                  />
+                                </svg>
+                                Authenticating with passkey...
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
 
                     <div className="relative">
@@ -1814,11 +1870,19 @@ export default function WalletApp() {
                 onClick={() => setShowAccountSwitcher(true)}
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
-                <PunkAvatar
-                  address={wallet.address}
-                  size={44}
-                  className="rounded-sm"
-                />
+                {useEnsAvatar && ensAvatarUrl ? (
+                  <img
+                    src={ensAvatarUrl}
+                    alt="ENS Avatar"
+                    className="w-11 h-11 rounded-sm object-cover"
+                  />
+                ) : (
+                  <PunkAvatar
+                    address={wallet.address}
+                    size={44}
+                    className="rounded-sm"
+                  />
+                )}
                 <div className="flex flex-col items-start">
                   <span className="font-medium text-base flex items-center gap-1">
                     {walletEnsName || wallet.credential.username || "Wallet"}
@@ -2683,13 +2747,21 @@ export default function WalletApp() {
             </div>
 
             <div className="text-center space-y-6 py-4">
-              {/* Punk Avatar */}
+              {/* Avatar */}
               <div className="flex justify-center">
-                <PunkAvatar
-                  address={wallet.address}
-                  size={80}
-                  className="rounded-sm"
-                />
+                {useEnsAvatar && ensAvatarUrl ? (
+                  <img
+                    src={ensAvatarUrl}
+                    alt="ENS Avatar"
+                    className="w-20 h-20 rounded-sm object-cover"
+                  />
+                ) : (
+                  <PunkAvatar
+                    address={wallet.address}
+                    size={80}
+                    className="rounded-sm"
+                  />
+                )}
               </div>
 
               {/* QR Code */}
@@ -2700,10 +2772,18 @@ export default function WalletApp() {
                   level="H"
                   includeMargin={false}
                 />
-                {/* Punk overlay in center of QR */}
+                {/* Avatar overlay in center of QR */}
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="bg-foreground p-1 rounded-sm">
-                    <PunkBlockie address={wallet.address} size={36} />
+                    {useEnsAvatar && ensAvatarUrl ? (
+                      <img
+                        src={ensAvatarUrl}
+                        alt="ENS Avatar"
+                        className="w-9 h-9 rounded-sm object-cover"
+                      />
+                    ) : (
+                      <PunkBlockie address={wallet.address} size={36} />
+                    )}
                   </div>
                 </div>
               </div>
@@ -2946,7 +3026,15 @@ export default function WalletApp() {
               {!isEditingName ? (
                 <div className="flex items-center justify-between p-4 rounded-sm bg-input-bg border border-card-border">
                   <div className="flex items-center gap-3">
-                    <PunkAvatar address={wallet.address} size={40} />
+                    {useEnsAvatar && ensAvatarUrl ? (
+                      <img
+                        src={ensAvatarUrl}
+                        alt="ENS Avatar"
+                        className="w-10 h-10 rounded-sm object-cover"
+                      />
+                    ) : (
+                      <PunkAvatar address={wallet.address} size={40} />
+                    )}
                     <span className="font-medium">
                       {wallet.credential.username || "Wallet"}
                     </span>
@@ -3010,6 +3098,97 @@ export default function WalletApp() {
               )}
             </div>
 
+            {/* ENS Avatar Toggle */}
+            <div className="pt-6 mt-6 border-t border-card-border space-y-4">
+              <h3 className="text-lg font-semibold">Profile Avatar</h3>
+              <div className="p-4 rounded-sm bg-input-bg border border-card-border space-y-4">
+                {/* Avatar Preview with Label */}
+                <div className="flex flex-col items-center gap-2">
+                  {useEnsAvatar && ensAvatarUrl ? (
+                    <img
+                      src={ensAvatarUrl}
+                      alt="ENS Avatar"
+                      className="w-16 h-16 rounded-sm object-cover"
+                    />
+                  ) : (
+                    <PunkAvatar address={wallet.address} size={64} />
+                  )}
+                  <p className="text-xs text-muted">
+                    {useEnsAvatar && ensAvatarUrl
+                      ? "Showing ENS Avatar"
+                      : "Showing Punk Avatar"}
+                  </p>
+                </div>
+
+                {/* Toggle Row */}
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="font-medium">
+                      {useEnsAvatar && ensAvatarUrl
+                        ? "ENS Avatar"
+                        : "Punk Avatar"}
+                    </p>
+                    <p className="text-sm text-muted">
+                      {loadingEnsAvatar
+                        ? "Loading ENS avatar..."
+                        : walletEnsName
+                        ? ensAvatarUrl
+                          ? useEnsAvatar
+                            ? "Switch to Punk avatar"
+                            : "Switch to ENS avatar"
+                          : "No ENS avatar found"
+                        : "No ENS name for this address"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleToggleEnsAvatar(!useEnsAvatar)}
+                    disabled={!ensAvatarUrl || loadingEnsAvatar}
+                    className={`relative shrink-0 w-12 h-7 rounded-full transition-colors duration-200 ${
+                      useEnsAvatar && ensAvatarUrl
+                        ? "bg-accent"
+                        : "bg-card-border"
+                    } ${
+                      !ensAvatarUrl || loadingEnsAvatar
+                        ? "opacity-50 cursor-not-allowed"
+                        : "cursor-pointer"
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                        useEnsAvatar && ensAvatarUrl
+                          ? "translate-x-6"
+                          : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {loadingEnsAvatar && (
+                  <div className="flex justify-center">
+                    <svg
+                      className="w-5 h-5 animate-spin text-muted"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Export Private Key */}
             <div className="pt-6 mt-6 border-t border-card-border space-y-4">
               <h3 className="text-lg font-semibold">Export Private Key</h3>
@@ -3055,7 +3234,15 @@ export default function WalletApp() {
 
                   {/* Wallet info */}
                   <div className="flex items-center gap-4 p-4 rounded-sm bg-input-bg border border-card-border">
-                    <PunkAvatar address={wallet.address} size={48} />
+                    {useEnsAvatar && ensAvatarUrl ? (
+                      <img
+                        src={ensAvatarUrl}
+                        alt="ENS Avatar"
+                        className="w-12 h-12 rounded-sm object-cover"
+                      />
+                    ) : (
+                      <PunkAvatar address={wallet.address} size={48} />
+                    )}
                     <div>
                       <div className="font-medium">
                         {wallet.credential.username || "Wallet"}
@@ -3299,7 +3486,15 @@ export default function WalletApp() {
 
                     {/* Wallet info */}
                     <div className="flex items-center gap-4 p-3 rounded-sm bg-input-bg border border-card-border">
-                      <PunkAvatar address={wallet.address} size={40} />
+                      {useEnsAvatar && ensAvatarUrl ? (
+                        <img
+                          src={ensAvatarUrl}
+                          alt="ENS Avatar"
+                          className="w-10 h-10 rounded-sm object-cover"
+                        />
+                      ) : (
+                        <PunkAvatar address={wallet.address} size={40} />
+                      )}
                       <div>
                         <div className="font-medium text-sm">
                           {wallet.credential.username || "Wallet"}
@@ -4124,7 +4319,15 @@ export default function WalletApp() {
                 </p>
                 <div className="p-4 rounded-sm bg-accent/10 border border-accent">
                   <div className="flex items-center gap-3">
-                    <PunkAvatar address={wallet.address} size={48} />
+                    {useEnsAvatar && ensAvatarUrl ? (
+                      <img
+                        src={ensAvatarUrl}
+                        alt="ENS Avatar"
+                        className="w-12 h-12 rounded-sm object-cover"
+                      />
+                    ) : (
+                      <PunkAvatar address={wallet.address} size={48} />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">
                         {wallet.credential.username || "Wallet"}
@@ -4184,115 +4387,128 @@ export default function WalletApp() {
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {storedWallets
                       .filter((w) => w.address !== wallet.address)
-                      .map((w, i) => (
-                        <div
-                          key={w.credentialId}
-                          className="p-4 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={async () => {
-                                setSwitchingWalletIndex(i);
-                                setError(null);
-                                try {
-                                  let walletData: PasskeyWallet | null = null;
-                                  if (w.isImported) {
-                                    walletData = await unlockImportedWallet(w);
-                                  } else {
-                                    walletData = await authenticateWithWallet(
-                                      w
-                                    );
+                      .map((w, i) => {
+                        const ensData = getENSAvatarForDisplay(w.address);
+                        return (
+                          <div
+                            key={w.credentialId}
+                            className="p-4 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={async () => {
+                                  setSwitchingWalletIndex(i);
+                                  setError(null);
+                                  try {
+                                    let walletData: PasskeyWallet | null = null;
+                                    if (w.isImported) {
+                                      walletData = await unlockImportedWallet(
+                                        w
+                                      );
+                                    } else {
+                                      walletData = await authenticateWithWallet(
+                                        w
+                                      );
+                                    }
+                                    if (walletData) {
+                                      setWallet(walletData);
+                                      setShowAccountSwitcher(false);
+                                      setSuccess(`Switched to ${w.username}`);
+                                      setTimeout(() => setSuccess(null), 2000);
+                                    }
+                                    // If walletData is null, user likely cancelled - do nothing
+                                  } catch {
+                                    // User cancelled or error occurred - silently ignore
+                                  } finally {
+                                    setSwitchingWalletIndex(null);
                                   }
-                                  if (walletData) {
-                                    setWallet(walletData);
-                                    setShowAccountSwitcher(false);
-                                    setSuccess(`Switched to ${w.username}`);
-                                    setTimeout(() => setSuccess(null), 2000);
-                                  }
-                                  // If walletData is null, user likely cancelled - do nothing
-                                } catch {
-                                  // User cancelled or error occurred - silently ignore
-                                } finally {
-                                  setSwitchingWalletIndex(null);
-                                }
-                              }}
-                              disabled={switchingWalletIndex !== null}
-                              className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:opacity-50"
-                            >
-                              <PunkAvatar address={w.address} size={48} />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium truncate">
-                                  {w.username}
+                                }}
+                                disabled={switchingWalletIndex !== null}
+                                className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:opacity-50"
+                              >
+                                {ensData.enabled && ensData.url ? (
+                                  <img
+                                    src={ensData.url}
+                                    alt="ENS Avatar"
+                                    className="w-12 h-12 rounded-sm object-cover"
+                                  />
+                                ) : (
+                                  <PunkAvatar address={w.address} size={48} />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium truncate">
+                                    {w.username}
+                                  </div>
+                                  <div className="font-mono text-sm text-muted">
+                                    {formatAddress(w.address)}
+                                  </div>
                                 </div>
-                                <div className="font-mono text-sm text-muted">
-                                  {formatAddress(w.address)}
-                                </div>
+                              </button>
+                              <div className="text-right">
+                                {loadingBalances ? (
+                                  <div className="text-sm text-muted">...</div>
+                                ) : (
+                                  <>
+                                    <div className="font-semibold tabular-nums text-sm">
+                                      {parseFloat(
+                                        walletBalances[w.address] || "0"
+                                      ).toFixed(4)}
+                                    </div>
+                                    <div className="text-xs text-muted">
+                                      {getNativeTokenSymbol(network)}
+                                    </div>
+                                  </>
+                                )}
                               </div>
-                            </button>
-                            <div className="text-right">
-                              {loadingBalances ? (
-                                <div className="text-sm text-muted">...</div>
-                              ) : (
-                                <>
-                                  <div className="font-semibold tabular-nums text-sm">
-                                    {parseFloat(
-                                      walletBalances[w.address] || "0"
-                                    ).toFixed(4)}
-                                  </div>
-                                  <div className="text-xs text-muted">
-                                    {getNativeTokenSymbol(network)}
-                                  </div>
-                                </>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(w.address);
+                                  setSuccess("Address copied!");
+                                  setTimeout(() => setSuccess(null), 2000);
+                                }}
+                                className="p-2 rounded-sm hover:bg-card-border transition-colors"
+                                title="Copy address"
+                              >
+                                <svg
+                                  className="w-4 h-4 text-muted"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                  />
+                                </svg>
+                              </button>
+                              {switchingWalletIndex === i && (
+                                <svg
+                                  className="w-5 h-5 animate-spin text-accent"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                    fill="none"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                  />
+                                </svg>
                               )}
                             </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(w.address);
-                                setSuccess("Address copied!");
-                                setTimeout(() => setSuccess(null), 2000);
-                              }}
-                              className="p-2 rounded-sm hover:bg-card-border transition-colors"
-                              title="Copy address"
-                            >
-                              <svg
-                                className="w-4 h-4 text-muted"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                />
-                              </svg>
-                            </button>
-                            {switchingWalletIndex === i && (
-                              <svg
-                                className="w-5 h-5 animate-spin text-accent"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                  fill="none"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                />
-                              </svg>
-                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 </div>
               )}
