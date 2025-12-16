@@ -3,18 +3,35 @@ import { WalletKit, WalletKitTypes } from "@reown/walletkit";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
 import { formatEther, type Hex, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { mainnet, arbitrum, base } from "viem/chains";
+import { getAllNetworks, getAllNetworkIds, getCustomNetworks } from "./wallet";
 
 // WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
 const PROJECT_ID =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "demo-project-id";
 
-// Supported chains
-const SUPPORTED_CHAINS = {
-  "eip155:1": mainnet,
-  "eip155:42161": arbitrum,
-  "eip155:8453": base,
-};
+// Get supported chains dynamically from wallet configuration
+function getSupportedChains(): Record<string, Chain> {
+  const networks = getAllNetworks();
+  const supportedChains: Record<string, Chain> = {};
+
+  for (const [networkId, chain] of Object.entries(networks)) {
+    supportedChains[`eip155:${chain.id}`] = chain;
+  }
+
+  return supportedChains;
+}
+
+// Get chain ID to network ID mapping
+function getChainIdToNetworkMap(): Record<string, string> {
+  const networks = getAllNetworks();
+  const mapping: Record<string, string> = {};
+
+  for (const [networkId, chain] of Object.entries(networks)) {
+    mapping[String(chain.id)] = networkId;
+  }
+
+  return mapping;
+}
 
 const SUPPORTED_METHODS = [
   "eth_sendTransaction",
@@ -207,15 +224,19 @@ export async function approveSession(
   const wk = await initWalletConnect();
   if (!wk) throw new Error("WalletConnect not initialized");
 
+  // Get current supported chains dynamically
+  const supportedChains = getSupportedChains();
+  const chainKeys = Object.keys(supportedChains);
+
   // Build namespaces based on what the dApp requested
   const namespaces = buildApprovedNamespaces({
     proposal,
     supportedNamespaces: {
       eip155: {
-        chains: Object.keys(SUPPORTED_CHAINS),
+        chains: chainKeys,
         methods: SUPPORTED_METHODS,
         events: SUPPORTED_EVENTS,
-        accounts: Object.keys(SUPPORTED_CHAINS).map(
+        accounts: chainKeys.map(
           (chain) => `${chain}:${address}`
         ),
       },
@@ -405,26 +426,24 @@ export async function handleSessionRequest(
           gasPrice?: string;
         };
 
-        // Map chain IDs to network names and chain objects
+        // Get chain info dynamically
         const { createWalletClientForNetwork } = await import("./wallet");
         const chainId = params.chainId.split(":")[1];
-        const chainIdToNetwork: Record<string, { name: string; chain: Chain }> =
-          {
-            "1": { name: "mainnet", chain: mainnet },
-            "42161": { name: "arbitrum", chain: arbitrum },
-            "8453": { name: "base", chain: base },
-          };
+        const chainIdToNetworkId = getChainIdToNetworkMap();
+        const supportedChains = getSupportedChains();
 
-        const networkInfo =
-          chainIdToNetwork[chainId] || chainIdToNetwork["8453"];
+        // Find the network ID and chain for this chainId
+        const networkId = chainIdToNetworkId[chainId] || "base";
+        const chain = supportedChains[`eip155:${chainId}`] || supportedChains["eip155:8453"];
+
         const walletClient = createWalletClientForNetwork(
           privateKey,
-          networkInfo.name
+          networkId
         );
 
         const hash = await walletClient.sendTransaction({
           account,
-          chain: networkInfo.chain,
+          chain,
           to: tx.to as Hex,
           value: tx.value ? BigInt(tx.value) : undefined,
           data: tx.data as Hex | undefined,

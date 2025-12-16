@@ -638,8 +638,8 @@ export default function WalletApp() {
         setCustomNetworkRpcUrl("");
         setCustomNetworkSymbol("");
         setCustomNetworkExplorer("");
-        setSuccess(`Added ${customNetworkName} network!`);
-        setTimeout(() => setSuccess(null), 2000);
+        setSuccess(`Added ${customNetworkName}! Note: Reconnect WalletConnect sessions to use this network with dApps.`);
+        setTimeout(() => setSuccess(null), 5000);
       } else {
         setError("Network already exists or ID/Chain ID is taken");
       }
@@ -3645,37 +3645,50 @@ export default function WalletApp() {
             }}
           >
             <div
-              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom max-h-[80vh] overflow-y-auto"
+              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4 flex-shrink-0">
                 <h3 className="text-lg font-semibold">
                   {showAddNetwork ? "Add Custom Network" : "Select Network"}
                 </h3>
-                <button
-                  onClick={() => {
-                    if (showAddNetwork) {
-                      setShowAddNetwork(false);
-                    } else {
-                      setShowNetworkModal(false);
-                    }
-                  }}
-                  className="p-2 rounded-sm hover:bg-card-border transition-colors"
-                >
-                  <svg
-                    className="w-5 h-5 text-muted"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+                <div className="flex items-center gap-2">
+                  {!showAddNetwork && (
+                    <button
+                      onClick={() => setShowAddNetwork(true)}
+                      className="px-3 py-1.5 rounded-sm text-sm font-medium transition-colors bg-accent/10 border border-accent text-accent hover:bg-accent/20 flex items-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (showAddNetwork) {
+                        setShowAddNetwork(false);
+                      } else {
+                        setShowNetworkModal(false);
+                      }
+                    }}
+                    className="p-2 rounded-sm hover:bg-card-border transition-colors"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d={showAddNetwork ? "M10 19l-7-7m0 0l7-7m-7 7h18" : "M6 18L18 6M6 6l12 12"}
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="w-5 h-5 text-muted"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d={showAddNetwork ? "M10 19l-7-7m0 0l7-7m-7 7h18" : "M6 18L18 6M6 6l12 12"}
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {showAddNetwork ? (
@@ -3764,105 +3777,94 @@ export default function WalletApp() {
                   </button>
                 </div>
               ) : (
-                <>
-                  <div className="space-y-2 mb-4">
-                    {networkIds.map((net) => {
-                      const netInfo = getNetworkInfo(net);
-                      return (
-                        <div
-                          key={net}
-                          className={`w-full p-4 rounded-sm flex items-center gap-4 transition-colors ${
-                            network === net
-                              ? "bg-accent/10 border border-accent"
-                              : "bg-input-bg border border-card-border hover:border-muted"
-                          }`}
+                <div className="space-y-2 overflow-y-auto flex-1 min-h-0">
+                  {networkIds.map((net) => {
+                    const netInfo = getNetworkInfo(net);
+                    return (
+                      <div
+                        key={net}
+                        className={`w-full p-4 rounded-sm flex items-center gap-4 transition-colors ${
+                          network === net
+                            ? "bg-accent/10 border border-accent"
+                            : "bg-input-bg border border-card-border hover:border-muted"
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            setNetwork(net);
+                            setShowNetworkModal(false);
+                          }}
+                          className="flex-1 flex items-center gap-4"
                         >
-                          <button
-                            onClick={() => {
-                              setNetwork(net);
-                              setShowNetworkModal(false);
-                            }}
-                            className="flex-1 flex items-center gap-4"
-                          >
-                            {netInfo.logo ? (
-                              <img
-                                src={netInfo.logo}
-                                alt={netInfo.name}
-                                className="w-8 h-8 rounded-full"
-                              />
-                            ) : (
-                              <span
-                                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                                  network === net ? "bg-accent text-white" : "bg-muted/30 text-muted"
-                                }`}
-                              >
-                                {netInfo.name.charAt(0)}
-                              </span>
-                            )}
-                            <div className="flex flex-col items-start">
-                              <span className="text-base font-medium">
-                                {netInfo.name}
-                              </span>
-                              {netInfo.isCustom && (
-                                <span className="text-xs text-muted">
-                                  {netInfo.symbol} · Custom
-                                </span>
-                              )}
-                            </div>
-                            {network === net && (
-                              <svg
-                                className="w-5 h-5 text-accent ml-auto"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M5 13l4 4L19 7"
-                                />
-                              </svg>
-                            )}
-                          </button>
-                          {netInfo.isCustom && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveCustomNetwork(net);
-                              }}
-                              className="p-2 rounded-sm hover:bg-red-500/20 text-muted hover:text-red-400 transition-colors"
-                              title="Remove network"
+                          {netInfo.logo ? (
+                            <img
+                              src={netInfo.logo}
+                              alt={netInfo.name}
+                              className="w-8 h-8 rounded-full"
+                            />
+                          ) : (
+                            <span
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                network === net ? "bg-accent text-white" : "bg-muted/30 text-muted"
+                              }`}
                             >
-                              <svg
-                                className="w-4 h-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                />
-                              </svg>
-                            </button>
+                              {netInfo.name.charAt(0)}
+                            </span>
                           )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <button
-                    onClick={() => setShowAddNetwork(true)}
-                    className="w-full p-4 rounded-sm font-medium transition-colors bg-input-bg border border-card-border hover:border-accent text-muted hover:text-foreground flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add Custom Network
-                  </button>
-                </>
+                          <div className="flex flex-col items-start">
+                            <span className="text-base font-medium">
+                              {netInfo.name}
+                            </span>
+                            {netInfo.isCustom && (
+                              <span className="text-xs text-muted">
+                                {netInfo.symbol} · Custom
+                              </span>
+                            )}
+                          </div>
+                          {network === net && (
+                            <svg
+                              className="w-5 h-5 text-accent ml-auto"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          )}
+                        </button>
+                        {netInfo.isCustom && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveCustomNetwork(net);
+                            }}
+                            className="p-2 rounded-sm hover:bg-red-500/20 text-muted hover:text-red-400 transition-colors"
+                            title="Remove network"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
