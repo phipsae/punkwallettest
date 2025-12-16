@@ -163,6 +163,8 @@ export default function WalletApp() {
   // Export private key state
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [exportConfirmed, setExportConfirmed] = useState(false);
+  const [isAuthenticatingForExport, setIsAuthenticatingForExport] =
+    useState(false);
 
   // Delete account state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -463,10 +465,24 @@ export default function WalletApp() {
         setWallet(walletData);
         setView("wallet");
       } else {
-        setError("Failed to unlock wallet");
+        // Authentication returned null - passkey may no longer exist
+        setError(
+          "Passkey not found. Try 'Use a different wallet' to reset, or recover your wallet."
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to unlock wallet");
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      // Check for NotAllowedError which often means the passkey was deleted
+      if (
+        errorMessage.includes("NotAllowedError") ||
+        errorMessage.includes("not allowed")
+      ) {
+        setError(
+          "Passkey authentication failed. The passkey may have been deleted. Try 'Use a different wallet' to reset."
+        );
+      } else {
+        setError(errorMessage || "Failed to unlock wallet");
+      }
     } finally {
       setLoading(false);
     }
@@ -1060,6 +1076,53 @@ export default function WalletApp() {
     await navigator.clipboard.writeText(wallet.privateKey);
     setSuccess("Private key copied to clipboard!");
     setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Handle revealing private key with passkey authentication
+  const handleRevealPrivateKey = async () => {
+    if (!wallet) return;
+
+    // If already shown, just hide it (no auth needed)
+    if (showPrivateKey) {
+      setShowPrivateKey(false);
+      return;
+    }
+
+    // Require passkey authentication before revealing
+    setIsAuthenticatingForExport(true);
+    setError(null);
+
+    try {
+      // Create a StoredWallet object from the current wallet for authentication
+      const storedWallet: StoredWallet = {
+        credentialId: wallet.credential.credentialId,
+        credentialIdHex: wallet.credential.credentialIdHex,
+        username: wallet.credential.username || "Wallet",
+        address: wallet.address,
+        createdAt: wallet.credential.createdAt,
+        isImported: wallet.credential.isImported,
+      };
+
+      // Authenticate - for imported wallets use unlockImportedWallet, for others use authenticateWithWallet
+      let authResult;
+      if (storedWallet.isImported) {
+        authResult = await unlockImportedWallet(storedWallet);
+      } else {
+        authResult = await authenticateWithWallet(storedWallet);
+      }
+
+      if (authResult) {
+        // Authentication successful, reveal the private key
+        setShowPrivateKey(true);
+      } else {
+        setError("Authentication failed. Please try again.");
+      }
+    } catch (err) {
+      console.error("Passkey authentication failed:", err);
+      setError("Authentication cancelled or failed.");
+    } finally {
+      setIsAuthenticatingForExport(false);
+    }
   };
 
   // Generate EIP-681 payment URI for receive QR code
@@ -3024,10 +3087,34 @@ export default function WalletApp() {
                     <div className="flex items-center justify-between">
                       <label className="text-sm text-muted">Private Key</label>
                       <button
-                        onClick={() => setShowPrivateKey(!showPrivateKey)}
-                        className="text-sm text-accent hover:text-accent-light transition-colors flex items-center gap-1"
+                        onClick={handleRevealPrivateKey}
+                        disabled={isAuthenticatingForExport}
+                        className="text-sm text-accent hover:text-accent-light transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {showPrivateKey ? (
+                        {isAuthenticatingForExport ? (
+                          <>
+                            <svg
+                              className="w-4 h-4 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Authenticating...
+                          </>
+                        ) : showPrivateKey ? (
                           <>
                             <svg
                               className="w-4 h-4"

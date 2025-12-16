@@ -42,21 +42,42 @@ const WALLETS_LIST_KEY = "punk_wallet_list";
 // This MUST match the domain in your apple-app-site-association file
 // Set NEXT_PUBLIC_PASSKEY_RP_ID in your .env.local or Vercel environment
 function getPasskeyRpId(): string {
-  // For local development, always use the current hostname
-  // This must be checked FIRST to allow localhost testing even when env var is set
+  // Check if running in Capacitor native app
+  const isCapacitor =
+    typeof window !== "undefined" &&
+    (
+      window as unknown as {
+        Capacitor?: { isNativePlatform?: () => boolean };
+      }
+    )?.Capacitor?.isNativePlatform?.();
+
+  // For Capacitor apps, ALWAYS use the production RP ID from env var
+  // (Capacitor runs on localhost internally but needs the real domain for passkeys)
+  if (isCapacitor) {
+    if (
+      typeof process !== "undefined" &&
+      process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
+    ) {
+      return process.env.NEXT_PUBLIC_PASSKEY_RP_ID;
+    }
+  }
+
+  // For browser-based local development (not Capacitor), use localhost
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       return hostname;
     }
   }
-  // Use environment variable if set (for production)
+
+  // Use environment variable if set (for production web)
   if (
     typeof process !== "undefined" &&
     process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
   ) {
     return process.env.NEXT_PUBLIC_PASSKEY_RP_ID;
   }
+
   // Fallback to current hostname
   if (typeof window !== "undefined") {
     return window.location.hostname;
