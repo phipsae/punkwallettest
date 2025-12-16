@@ -74,7 +74,7 @@ import {
   type SessionRequest,
   type ActiveSession,
 } from "@/lib/walletconnect";
-import { getETHPrice, formatUSD, calculateUSDValue } from "@/lib/price";
+import { getETHPrice, formatUSD, calculateUSDValue, getNativeTokenPrice, getNativeTokenSymbol } from "@/lib/price";
 
 type View =
   | "onboarding"
@@ -136,8 +136,8 @@ export default function WalletApp() {
   const [customTokenAddress, setCustomTokenAddress] = useState("");
   const [addingToken, setAddingToken] = useState(false);
 
-  // ETH Price state (from Uniswap V3)
-  const [ethPrice, setEthPrice] = useState<number>(0);
+  // Native token price state (ETH or POL depending on network)
+  const [nativeTokenPrice, setNativeTokenPrice] = useState<number>(0);
 
   // WalletConnect state
   const [wcUri, setWcUri] = useState("");
@@ -341,14 +341,14 @@ export default function WalletApp() {
     }
   }, [error]);
 
-  // Fetch ETH price from Uniswap V3 (mainnet only)
+  // Fetch native token price (ETH or POL depending on network)
   useEffect(() => {
     const fetchPrice = async () => {
       try {
-        const price = await getETHPrice();
-        setEthPrice(price);
+        const price = await getNativeTokenPrice(network);
+        setNativeTokenPrice(price);
       } catch (err) {
-        console.error("Failed to fetch ETH price:", err);
+        console.error("Failed to fetch native token price:", err);
       }
     };
 
@@ -358,7 +358,7 @@ export default function WalletApp() {
     // Refresh every 30 seconds
     const interval = setInterval(fetchPrice, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [network]);
 
   // Resolve ENS names when user types in send field
   useEffect(() => {
@@ -513,7 +513,7 @@ export default function WalletApp() {
       if (result.success) {
         setTxHash(result.hash);
         setSuccess(
-          `${selectedToken ? selectedToken.symbol : "ETH"} sent successfully!`
+          `${selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)} sent successfully!`
         );
         setTimeout(() => setSuccess(null), 3000);
         setSendTo("");
@@ -1370,7 +1370,7 @@ export default function WalletApp() {
                                       walletBalances[w.address] || "0"
                                     ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-muted">ETH</div>
+                                  <div className="text-xs text-muted">{getNativeTokenSymbol(network)}</div>
                                 </>
                               )}
                             </div>
@@ -1951,10 +1951,10 @@ export default function WalletApp() {
               <div className="text-4xl font-bold tabular-nums tracking-tight pt-6">
                 {parseFloat(balance).toFixed(6)}
               </div>
-              <div className="text-lg text-muted mt-1">ETH</div>
-              {ethPrice > 0 && (
+              <div className="text-lg text-muted mt-1">{getNativeTokenSymbol(network)}</div>
+              {nativeTokenPrice > 0 && (
                 <div className="text-xl text-accent font-semibold mt-2">
-                  {formatUSD(calculateUSDValue(balance, ethPrice))}
+                  {formatUSD(calculateUSDValue(balance, nativeTokenPrice))}
                 </div>
               )}
             </div>
@@ -2096,7 +2096,7 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold tracking-tight">
-                Send {selectedToken ? selectedToken.symbol : "ETH"}
+                Send {selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}
               </h2>
               <button
                 onClick={() => {
@@ -2167,10 +2167,10 @@ export default function WalletApp() {
                       <div className="text-center">
                         <div className="w-8 h-8 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
                           <span className="text-xs font-bold text-accent">
-                            Ξ
+                            {getNativeTokenSymbol(network) === "POL" ? "◆" : "Ξ"}
                           </span>
                         </div>
-                        <div className="text-xs font-medium">ETH</div>
+                        <div className="text-xs font-medium">{getNativeTokenSymbol(network)}</div>
                       </div>
                     </button>
                     {tokenBalances
@@ -2318,23 +2318,23 @@ export default function WalletApp() {
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-sm text-muted">Amount</label>
                     {/* USD/ETH Toggle - only for ETH, not tokens */}
-                    {!selectedToken && ethPrice > 0 && (
+                    {!selectedToken && nativeTokenPrice > 0 && (
                       <button
                         onClick={() => {
                           if (isUSDMode) {
                             // Switching to ETH mode - convert USD to ETH
-                            if (sendAmountUSD && ethPrice > 0) {
+                            if (sendAmountUSD && nativeTokenPrice > 0) {
                               const ethValue =
-                                parseFloat(sendAmountUSD) / ethPrice;
+                                parseFloat(sendAmountUSD) / nativeTokenPrice;
                               setSendAmount(
                                 ethValue > 0 ? ethValue.toFixed(8) : ""
                               );
                             }
                           } else {
                             // Switching to USD mode - convert ETH to USD
-                            if (sendAmount && ethPrice > 0) {
+                            if (sendAmount && nativeTokenPrice > 0) {
                               const usdValue =
-                                parseFloat(sendAmount) * ethPrice;
+                                parseFloat(sendAmount) * nativeTokenPrice;
                               setSendAmountUSD(
                                 usdValue > 0 ? usdValue.toFixed(2) : ""
                               );
@@ -2379,8 +2379,8 @@ export default function WalletApp() {
                         if (!selectedToken && isUSDMode) {
                           setSendAmountUSD(value);
                           // Auto-calculate ETH amount
-                          if (value && ethPrice > 0) {
-                            const ethValue = parseFloat(value) / ethPrice;
+                          if (value && nativeTokenPrice > 0) {
+                            const ethValue = parseFloat(value) / nativeTokenPrice;
                             setSendAmount(
                               ethValue > 0 ? ethValue.toFixed(8) : ""
                             );
@@ -2390,8 +2390,8 @@ export default function WalletApp() {
                         } else {
                           setSendAmount(value);
                           // Auto-calculate USD amount
-                          if (value && ethPrice > 0 && !selectedToken) {
-                            const usdValue = parseFloat(value) * ethPrice;
+                          if (value && nativeTokenPrice > 0 && !selectedToken) {
+                            const usdValue = parseFloat(value) * nativeTokenPrice;
                             setSendAmountUSD(
                               usdValue > 0 ? usdValue.toFixed(2) : ""
                             );
@@ -2412,7 +2412,7 @@ export default function WalletApp() {
                           ? selectedToken.symbol
                           : isUSDMode
                           ? "USD"
-                          : "ETH"}
+                          : getNativeTokenSymbol(network)}
                       </span>
                       <button
                         onClick={() => {
@@ -2421,15 +2421,15 @@ export default function WalletApp() {
                               (tb) => tb.token.address === selectedToken.address
                             );
                             if (tokenBal) setSendAmount(tokenBal.balance);
-                          } else if (isUSDMode && ethPrice > 0) {
-                            const maxUSD = parseFloat(balance) * ethPrice;
+                          } else if (isUSDMode && nativeTokenPrice > 0) {
+                            const maxUSD = parseFloat(balance) * nativeTokenPrice;
                             setSendAmountUSD(maxUSD.toFixed(2));
                             setSendAmount(balance);
                           } else {
                             setSendAmount(balance);
-                            if (ethPrice > 0) {
+                            if (nativeTokenPrice > 0) {
                               setSendAmountUSD(
-                                (parseFloat(balance) * ethPrice).toFixed(2)
+                                (parseFloat(balance) * nativeTokenPrice).toFixed(2)
                               );
                             }
                           }
@@ -2450,15 +2450,15 @@ export default function WalletApp() {
                           )?.balance || "0"
                         )
                       : parseFloat(balance).toFixed(6)}{" "}
-                    {selectedToken ? selectedToken.symbol : "ETH"}
-                    {!selectedToken && ethPrice > 0 && (
+                    {selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}
+                    {!selectedToken && nativeTokenPrice > 0 && (
                       <span className="text-accent ml-1">
-                        ({formatUSD(calculateUSDValue(balance, ethPrice))})
+                        ({formatUSD(calculateUSDValue(balance, nativeTokenPrice))})
                       </span>
                     )}
                   </p>
                   {/* Conversion display - always visible, fixed height */}
-                  {!selectedToken && ethPrice > 0 && (
+                  {!selectedToken && nativeTokenPrice > 0 && (
                     <p className="text-sm h-5 mt-1">
                       {sendAmount ? (
                         <span className="text-accent">
@@ -2470,7 +2470,7 @@ export default function WalletApp() {
                             <>
                               ≈{" "}
                               {formatUSD(
-                                calculateUSDValue(sendAmount, ethPrice)
+                                calculateUSDValue(sendAmount, nativeTokenPrice)
                               )}
                             </>
                           )}
@@ -2514,7 +2514,7 @@ export default function WalletApp() {
                       Signing & Sending...
                     </span>
                   ) : (
-                    `Send ${selectedToken ? selectedToken.symbol : "ETH"}`
+                    `Send ${selectedToken ? selectedToken.symbol : getNativeTokenSymbol(network)}`
                   )}
                 </button>
               </div>
@@ -2527,7 +2527,7 @@ export default function WalletApp() {
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold tracking-tight">
-                Receive {receiveToken ? receiveToken.symbol : "ETH"}
+                Receive {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
               </h2>
               <button
                 onClick={() => {
@@ -2585,7 +2585,7 @@ export default function WalletApp() {
                 <div className="p-3 bg-accent/10 border border-accent/30 rounded-sm">
                   <p className="text-sm text-accent font-medium">
                     Requesting {receiveAmount}{" "}
-                    {receiveToken ? receiveToken.symbol : "ETH"}
+                    {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
                   </p>
                   <p className="text-xs text-muted mt-1">
                     Scanner will have this amount prefilled
@@ -2639,10 +2639,10 @@ export default function WalletApp() {
                           <div className="text-center">
                             <div className="w-6 h-6 rounded-sm bg-accent/10 flex items-center justify-center mx-auto mb-1">
                               <span className="text-xs font-bold text-accent">
-                                Ξ
+                                {getNativeTokenSymbol(network) === "POL" ? "◆" : "Ξ"}
                               </span>
                             </div>
-                            <div className="text-xs font-medium">ETH</div>
+                            <div className="text-xs font-medium">{getNativeTokenSymbol(network)}</div>
                           </div>
                         </button>
                         {/* Token options */}
@@ -2701,15 +2701,15 @@ export default function WalletApp() {
                           className="w-full px-4 py-3 bg-input-bg border border-card-border rounded-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors pr-16"
                         />
                         <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted font-medium">
-                          {receiveToken ? receiveToken.symbol : "ETH"}
+                          {receiveToken ? receiveToken.symbol : getNativeTokenSymbol(network)}
                         </div>
                       </div>
                       {receiveAmount &&
                         parseFloat(receiveAmount) > 0 &&
                         !receiveToken &&
-                        ethPrice > 0 && (
+                        nativeTokenPrice > 0 && (
                           <p className="text-sm text-muted mt-1">
-                            ≈ {formatUSD(parseFloat(receiveAmount) * ethPrice)}
+                            ≈ {formatUSD(parseFloat(receiveAmount) * nativeTokenPrice)}
                           </p>
                         )}
                     </div>
@@ -4028,7 +4028,7 @@ export default function WalletApp() {
                                       walletBalances[w.address] || "0"
                                     ).toFixed(4)}
                                   </div>
-                                  <div className="text-xs text-muted">ETH</div>
+                                  <div className="text-xs text-muted">{getNativeTokenSymbol(network)}</div>
                                 </>
                               )}
                             </div>

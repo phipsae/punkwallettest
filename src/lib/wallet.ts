@@ -11,7 +11,7 @@ import {
 } from "viem";
 import { normalize } from "viem/ens";
 import { privateKeyToAccount } from "viem/accounts";
-import { mainnet, arbitrum, base, optimism, linea, zkSync } from "viem/chains";
+import { mainnet, arbitrum, base, optimism, linea, zkSync, polygon } from "viem/chains";
 
 // Custom network interface for user-added networks
 export interface CustomNetwork {
@@ -35,6 +35,7 @@ export const DEFAULT_NETWORKS: Record<string, Chain> = {
   optimism,
   linea,
   zksync: zkSync,
+  polygon,
 };
 
 // Default to Base
@@ -51,6 +52,7 @@ const DEFAULT_RPC_URLS: Record<string, string> = {
   optimism: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   linea: `https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   zksync: `https://zksync-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  polygon: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
 
 // Get custom networks from local storage
@@ -163,6 +165,7 @@ const NETWORK_LOGOS: Record<string, string> = {
   optimism: "https://icons.llamao.fi/icons/chains/rsz_optimism.jpg",
   linea: "https://icons.llamao.fi/icons/chains/rsz_linea.jpg",
   zksync: "https://icons.llamao.fi/icons/chains/rsz_zksync%20era.jpg",
+  polygon: "https://icons.llamao.fi/icons/chains/rsz_polygon.jpg",
 };
 
 // Get network display info
@@ -351,6 +354,7 @@ const DEFAULT_EXPLORERS: Record<string, string> = {
   optimism: "https://optimistic.etherscan.io",
   linea: "https://lineascan.build",
   zksync: "https://explorer.zksync.io",
+  polygon: "https://polygonscan.com",
 };
 
 // Get explorer base URL for a network
