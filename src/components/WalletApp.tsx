@@ -39,6 +39,13 @@ import {
   isENSName,
   resolveENS,
   getENSName,
+  getAllNetworks,
+  getCustomNetworks,
+  addCustomNetwork,
+  removeCustomNetwork,
+  getNetworkInfo,
+  getAllNetworkIds,
+  type CustomNetwork,
 } from "@/lib/wallet";
 import {
   getAllTokenBalances,
@@ -157,6 +164,16 @@ export default function WalletApp() {
   const [showAccountSwitcher, setShowAccountSwitcher] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Custom network state
+  const [showAddNetwork, setShowAddNetwork] = useState(false);
+  const [customNetworkName, setCustomNetworkName] = useState("");
+  const [customNetworkChainId, setCustomNetworkChainId] = useState("");
+  const [customNetworkRpcUrl, setCustomNetworkRpcUrl] = useState("");
+  const [customNetworkSymbol, setCustomNetworkSymbol] = useState("");
+  const [customNetworkExplorer, setCustomNetworkExplorer] = useState("");
+  const [addingNetwork, setAddingNetwork] = useState(false);
+  const [networkIds, setNetworkIds] = useState<string[]>(Object.keys(NETWORKS));
   const [switchingWalletIndex, setSwitchingWalletIndex] = useState<
     number | null
   >(null);
@@ -207,6 +224,8 @@ export default function WalletApp() {
     const wallets = getStoredWallets();
     setStoredWallets(wallets);
     fetchWalletBalances(wallets);
+    // Load custom networks
+    setNetworkIds(getAllNetworkIds());
     // Keep on onboarding view - user needs to unlock with passkey first
     // View switches to "wallet" only after successful unlock
   }, [fetchWalletBalances]);
@@ -554,6 +573,92 @@ export default function WalletApp() {
     removeCustomToken(network, tokenAddress);
     fetchTokenBalances();
     setSuccess("Token removed from list");
+    setTimeout(() => setSuccess(null), 2000);
+  };
+
+  // Add custom network
+  const handleAddCustomNetwork = async () => {
+    if (!customNetworkName.trim() || !customNetworkChainId.trim() || !customNetworkRpcUrl.trim() || !customNetworkSymbol.trim()) {
+      setError("Please fill in all required fields");
+      return;
+    }
+
+    const chainId = parseInt(customNetworkChainId, 10);
+    if (isNaN(chainId) || chainId <= 0) {
+      setError("Chain ID must be a valid positive number");
+      return;
+    }
+
+    // Generate a network ID from the name (lowercase, no spaces)
+    const networkId = customNetworkName.toLowerCase().replace(/\s+/g, "-");
+
+    setAddingNetwork(true);
+    try {
+      // Test the RPC URL by trying to fetch chain ID
+      const response = await fetch(customNetworkRpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_chainId",
+          params: [],
+          id: 1,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("RPC endpoint is not reachable");
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error.message || "Invalid RPC response");
+      }
+
+      // Verify chain ID matches
+      const rpcChainId = parseInt(data.result, 16);
+      if (rpcChainId !== chainId) {
+        throw new Error(`RPC chain ID (${rpcChainId}) doesn't match provided chain ID (${chainId})`);
+      }
+
+      const success = addCustomNetwork({
+        id: networkId,
+        name: customNetworkName.trim(),
+        chainId,
+        rpcUrl: customNetworkRpcUrl.trim(),
+        symbol: customNetworkSymbol.trim().toUpperCase(),
+        explorerUrl: customNetworkExplorer.trim() || undefined,
+      });
+
+      if (success) {
+        setNetworkIds(getAllNetworkIds());
+        setShowAddNetwork(false);
+        setCustomNetworkName("");
+        setCustomNetworkChainId("");
+        setCustomNetworkRpcUrl("");
+        setCustomNetworkSymbol("");
+        setCustomNetworkExplorer("");
+        setSuccess(`Added ${customNetworkName} network!`);
+        setTimeout(() => setSuccess(null), 2000);
+      } else {
+        setError("Network already exists or ID/Chain ID is taken");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add network");
+    } finally {
+      setAddingNetwork(false);
+    }
+  };
+
+  // Remove custom network
+  const handleRemoveCustomNetwork = (networkId: string) => {
+    // If the removed network is currently selected, switch to base
+    if (network === networkId) {
+      setNetwork("base");
+    }
+    removeCustomNetwork(networkId);
+    setNetworkIds(getAllNetworkIds());
+    setSuccess("Network removed");
     setTimeout(() => setSuccess(null), 2000);
   };
 
@@ -1791,11 +1896,21 @@ export default function WalletApp() {
               {/* Network Selector - Top Left */}
               <button
                 onClick={() => setShowNetworkModal(true)}
-                className="absolute top-0 left-0 px-3 py-1.5 rounded-sm bg-card-border hover:bg-muted/30 transition-colors flex items-center gap-2"
+                className="absolute top-0 left-0 px-2 py-1.5 rounded-sm bg-card-border hover:bg-muted/30 transition-colors flex items-center gap-2"
               >
-                <span className="w-2 h-2 rounded-full bg-accent"></span>
+                {getNetworkInfo(network).logo ? (
+                  <img
+                    src={getNetworkInfo(network).logo}
+                    alt={getNetworkInfo(network).name}
+                    className="w-5 h-5 rounded-full"
+                  />
+                ) : (
+                  <span className="w-5 h-5 rounded-full bg-accent flex items-center justify-center text-[10px] font-bold text-white">
+                    {getNetworkInfo(network).name.charAt(0)}
+                  </span>
+                )}
                 <span className="text-sm font-medium">
-                  {network.charAt(0).toUpperCase() + network.slice(1)}
+                  {getNetworkInfo(network).name}
                 </span>
                 <svg
                   className="w-3.5 h-3.5 text-muted"
@@ -2648,7 +2763,7 @@ export default function WalletApp() {
 
               <p className="text-muted text-sm">
                 Send only ETH or ERC-20 tokens to this address on{" "}
-                {network.charAt(0).toUpperCase() + network.slice(1)}
+                {getNetworkInfo(network).name}
               </p>
             </div>
           </div>
@@ -3402,7 +3517,7 @@ export default function WalletApp() {
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted">
                 All Tokens on{" "}
-                {network.charAt(0).toUpperCase() + network.slice(1)}
+                {getNetworkInfo(network).name}
               </h3>
 
               {loadingTokens ? (
@@ -3524,16 +3639,27 @@ export default function WalletApp() {
         {showNetworkModal && (
           <div
             className="fixed inset-0 bg-black/80 flex items-end justify-center z-50"
-            onClick={() => setShowNetworkModal(false)}
+            onClick={() => {
+              setShowNetworkModal(false);
+              setShowAddNetwork(false);
+            }}
           >
             <div
-              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom"
+              className="bg-card-bg border-t border-card-border w-full max-w-lg rounded-t-2xl p-6 pb-10 animate-slide-up safe-area-bottom max-h-[80vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold">Select Network</h3>
+                <h3 className="text-lg font-semibold">
+                  {showAddNetwork ? "Add Custom Network" : "Select Network"}
+                </h3>
                 <button
-                  onClick={() => setShowNetworkModal(false)}
+                  onClick={() => {
+                    if (showAddNetwork) {
+                      setShowAddNetwork(false);
+                    } else {
+                      setShowNetworkModal(false);
+                    }
+                  }}
                   className="p-2 rounded-sm hover:bg-card-border transition-colors"
                 >
                   <svg
@@ -3546,51 +3672,198 @@ export default function WalletApp() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
+                      d={showAddNetwork ? "M10 19l-7-7m0 0l7-7m-7 7h18" : "M6 18L18 6M6 6l12 12"}
                     />
                   </svg>
                 </button>
               </div>
-              <div className="space-y-2">
-                {Object.keys(NETWORKS).map((net) => (
+
+              {showAddNetwork ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-muted mb-1.5">
+                      Network Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={customNetworkName}
+                      onChange={(e) => setCustomNetworkName(e.target.value)}
+                      placeholder="e.g. Optimism"
+                      className="w-full p-3 bg-input-bg border border-card-border rounded-sm focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-1.5">
+                      Chain ID *
+                    </label>
+                    <input
+                      type="number"
+                      value={customNetworkChainId}
+                      onChange={(e) => setCustomNetworkChainId(e.target.value)}
+                      placeholder="e.g. 10"
+                      className="w-full p-3 bg-input-bg border border-card-border rounded-sm focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-1.5">
+                      RPC URL *
+                    </label>
+                    <input
+                      type="url"
+                      value={customNetworkRpcUrl}
+                      onChange={(e) => setCustomNetworkRpcUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="w-full p-3 bg-input-bg border border-card-border rounded-sm focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-1.5">
+                      Currency Symbol *
+                    </label>
+                    <input
+                      type="text"
+                      value={customNetworkSymbol}
+                      onChange={(e) => setCustomNetworkSymbol(e.target.value)}
+                      placeholder="e.g. ETH"
+                      className="w-full p-3 bg-input-bg border border-card-border rounded-sm focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-muted mb-1.5">
+                      Block Explorer URL (optional)
+                    </label>
+                    <input
+                      type="url"
+                      value={customNetworkExplorer}
+                      onChange={(e) => setCustomNetworkExplorer(e.target.value)}
+                      placeholder="https://optimistic.etherscan.io"
+                      className="w-full p-3 bg-input-bg border border-card-border rounded-sm focus:outline-none focus:border-accent"
+                    />
+                  </div>
                   <button
-                    key={net}
-                    onClick={() => {
-                      setNetwork(net);
-                      setShowNetworkModal(false);
-                    }}
-                    className={`w-full p-4 rounded-sm flex items-center gap-4 transition-colors ${
-                      network === net
-                        ? "bg-accent/10 border border-accent"
-                        : "bg-input-bg border border-card-border hover:border-muted"
-                    }`}
+                    onClick={handleAddCustomNetwork}
+                    disabled={addingNetwork || !customNetworkName || !customNetworkChainId || !customNetworkRpcUrl || !customNetworkSymbol}
+                    className="w-full p-4 rounded-sm font-medium transition-colors bg-accent hover:bg-accent-light text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    <span
-                      className={`w-3 h-3 rounded-full ${
-                        network === net ? "bg-accent" : "bg-muted"
-                      }`}
-                    ></span>
-                    <span className="text-base font-medium">
-                      {net.charAt(0).toUpperCase() + net.slice(1)}
-                    </span>
-                    {network === net && (
-                      <svg
-                        className="w-5 h-5 text-accent ml-auto"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
+                    {addingNetwork ? (
+                      <>
+                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add Network
+                      </>
                     )}
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2 mb-4">
+                    {networkIds.map((net) => {
+                      const netInfo = getNetworkInfo(net);
+                      return (
+                        <div
+                          key={net}
+                          className={`w-full p-4 rounded-sm flex items-center gap-4 transition-colors ${
+                            network === net
+                              ? "bg-accent/10 border border-accent"
+                              : "bg-input-bg border border-card-border hover:border-muted"
+                          }`}
+                        >
+                          <button
+                            onClick={() => {
+                              setNetwork(net);
+                              setShowNetworkModal(false);
+                            }}
+                            className="flex-1 flex items-center gap-4"
+                          >
+                            {netInfo.logo ? (
+                              <img
+                                src={netInfo.logo}
+                                alt={netInfo.name}
+                                className="w-8 h-8 rounded-full"
+                              />
+                            ) : (
+                              <span
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                  network === net ? "bg-accent text-white" : "bg-muted/30 text-muted"
+                                }`}
+                              >
+                                {netInfo.name.charAt(0)}
+                              </span>
+                            )}
+                            <div className="flex flex-col items-start">
+                              <span className="text-base font-medium">
+                                {netInfo.name}
+                              </span>
+                              {netInfo.isCustom && (
+                                <span className="text-xs text-muted">
+                                  {netInfo.symbol} · Custom
+                                </span>
+                              )}
+                            </div>
+                            {network === net && (
+                              <svg
+                                className="w-5 h-5 text-accent ml-auto"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                          {netInfo.isCustom && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveCustomNetwork(net);
+                              }}
+                              className="p-2 rounded-sm hover:bg-red-500/20 text-muted hover:text-red-400 transition-colors"
+                              title="Remove network"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setShowAddNetwork(true)}
+                    className="w-full p-4 rounded-sm font-medium transition-colors bg-input-bg border border-card-border hover:border-accent text-muted hover:text-foreground flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Custom Network
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}

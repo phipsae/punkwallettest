@@ -7,16 +7,34 @@ import {
   type PublicClient,
   type WalletClient,
   type Chain,
+  defineChain,
 } from "viem";
 import { normalize } from "viem/ens";
 import { privateKeyToAccount } from "viem/accounts";
-import { mainnet, arbitrum, base } from "viem/chains";
+import { mainnet, arbitrum, base, optimism, linea, zkSync } from "viem/chains";
 
-// Supported networks
-export const NETWORKS: Record<string, Chain> = {
+// Custom network interface for user-added networks
+export interface CustomNetwork {
+  id: string;
+  name: string;
+  chainId: number;
+  rpcUrl: string;
+  symbol: string;
+  explorerUrl?: string;
+  isCustom: true;
+}
+
+// Local storage key for custom networks
+const CUSTOM_NETWORKS_KEY = "punk_wallet_custom_networks";
+
+// Default supported networks
+export const DEFAULT_NETWORKS: Record<string, Chain> = {
   mainnet,
   arbitrum,
   base,
+  optimism,
+  linea,
+  zksync: zkSync,
 };
 
 // Default to Base
@@ -25,12 +43,181 @@ const DEFAULT_NETWORK = "base";
 // Alchemy API Key from environment
 const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
 
-// RPC URLs - using Alchemy endpoints
-const RPC_URLS: Record<string, string> = {
+// Default RPC URLs - using Alchemy endpoints
+const DEFAULT_RPC_URLS: Record<string, string> = {
   mainnet: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  optimism: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  linea: `https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  zksync: `https://zksync-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
+
+// Get custom networks from local storage
+export function getCustomNetworks(): CustomNetwork[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = localStorage.getItem(CUSTOM_NETWORKS_KEY);
+    if (!stored) return [];
+    return JSON.parse(stored) as CustomNetwork[];
+  } catch {
+    return [];
+  }
+}
+
+// Save custom network to local storage
+export function addCustomNetwork(network: Omit<CustomNetwork, "isCustom">): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const customNetworks = getCustomNetworks();
+    // Check if network with same id or chainId already exists
+    const existsById = customNetworks.some((n) => n.id.toLowerCase() === network.id.toLowerCase());
+    const existsByChainId = customNetworks.some((n) => n.chainId === network.chainId);
+    const isDefaultNetwork = Object.keys(DEFAULT_NETWORKS).includes(network.id.toLowerCase());
+
+    if (existsById || existsByChainId || isDefaultNetwork) {
+      return false;
+    }
+
+    customNetworks.push({ ...network, isCustom: true });
+    localStorage.setItem(CUSTOM_NETWORKS_KEY, JSON.stringify(customNetworks));
+    return true;
+  } catch (error) {
+    console.error("Failed to save custom network:", error);
+    return false;
+  }
+}
+
+// Remove custom network from local storage
+export function removeCustomNetwork(networkId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const customNetworks = getCustomNetworks();
+    const filtered = customNetworks.filter((n) => n.id !== networkId);
+    localStorage.setItem(CUSTOM_NETWORKS_KEY, JSON.stringify(filtered));
+  } catch (error) {
+    console.error("Failed to remove custom network:", error);
+  }
+}
+
+// Convert CustomNetwork to viem Chain
+function customNetworkToChain(network: CustomNetwork): Chain {
+  return defineChain({
+    id: network.chainId,
+    name: network.name,
+    nativeCurrency: {
+      name: network.symbol,
+      symbol: network.symbol,
+      decimals: 18,
+    },
+    rpcUrls: {
+      default: {
+        http: [network.rpcUrl],
+      },
+    },
+    blockExplorers: network.explorerUrl
+      ? {
+          default: {
+            name: "Explorer",
+            url: network.explorerUrl,
+          },
+        }
+      : undefined,
+  });
+}
+
+// Get all networks (default + custom)
+export function getAllNetworks(): Record<string, Chain> {
+  const customNetworks = getCustomNetworks();
+  const allNetworks = { ...DEFAULT_NETWORKS };
+
+  for (const customNet of customNetworks) {
+    allNetworks[customNet.id] = customNetworkToChain(customNet);
+  }
+
+  return allNetworks;
+}
+
+// Get RPC URL for a network
+export function getRpcUrl(networkId: string): string {
+  // Check default RPC URLs first
+  if (DEFAULT_RPC_URLS[networkId]) {
+    return DEFAULT_RPC_URLS[networkId];
+  }
+
+  // Check custom networks
+  const customNetworks = getCustomNetworks();
+  const customNet = customNetworks.find((n) => n.id === networkId);
+  if (customNet) {
+    return customNet.rpcUrl;
+  }
+
+  return DEFAULT_RPC_URLS[DEFAULT_NETWORK];
+}
+
+// Network logos - using official chain logos
+const NETWORK_LOGOS: Record<string, string> = {
+  mainnet: "https://icons.llamao.fi/icons/chains/rsz_ethereum.jpg",
+  arbitrum: "https://icons.llamao.fi/icons/chains/rsz_arbitrum.jpg",
+  base: "https://icons.llamao.fi/icons/chains/rsz_base.jpg",
+  optimism: "https://icons.llamao.fi/icons/chains/rsz_optimism.jpg",
+  linea: "https://icons.llamao.fi/icons/chains/rsz_linea.jpg",
+  zksync: "https://icons.llamao.fi/icons/chains/rsz_zksync%20era.jpg",
+};
+
+// Get network display info
+export interface NetworkInfo {
+  id: string;
+  name: string;
+  symbol: string;
+  isCustom: boolean;
+  logo?: string;
+}
+
+export function getNetworkInfo(networkId: string): NetworkInfo {
+  // Check default networks
+  if (DEFAULT_NETWORKS[networkId]) {
+    const chain = DEFAULT_NETWORKS[networkId];
+    return {
+      id: networkId,
+      name: chain.name,
+      symbol: chain.nativeCurrency.symbol,
+      isCustom: false,
+      logo: NETWORK_LOGOS[networkId],
+    };
+  }
+
+  // Check custom networks
+  const customNetworks = getCustomNetworks();
+  const customNet = customNetworks.find((n) => n.id === networkId);
+  if (customNet) {
+    return {
+      id: networkId,
+      name: customNet.name,
+      symbol: customNet.symbol,
+      isCustom: true,
+    };
+  }
+
+  // Fallback to base
+  return {
+    id: "base",
+    name: "Base",
+    symbol: "ETH",
+    isCustom: false,
+    logo: NETWORK_LOGOS["base"],
+  };
+}
+
+// Get all network IDs
+export function getAllNetworkIds(): string[] {
+  const defaultIds = Object.keys(DEFAULT_NETWORKS);
+  const customIds = getCustomNetworks().map((n) => n.id);
+  return [...defaultIds, ...customIds];
+}
+
+// Export NETWORKS for backward compatibility (will be dynamic)
+export const NETWORKS: Record<string, Chain> = DEFAULT_NETWORKS;
 
 export interface WalletState {
   address: `0x${string}`;
@@ -49,8 +236,9 @@ export interface TransactionResult {
 export function createPublicClientForNetwork(
   networkId: string = DEFAULT_NETWORK
 ): PublicClient {
-  const chain = NETWORKS[networkId] || NETWORKS[DEFAULT_NETWORK];
-  const rpcUrl = RPC_URLS[networkId] || RPC_URLS[DEFAULT_NETWORK];
+  const networks = getAllNetworks();
+  const chain = networks[networkId] || networks[DEFAULT_NETWORK];
+  const rpcUrl = getRpcUrl(networkId);
 
   return createPublicClient({
     chain,
@@ -63,8 +251,9 @@ export function createWalletClientForNetwork(
   privateKey: `0x${string}`,
   networkId: string = DEFAULT_NETWORK
 ): WalletClient {
-  const chain = NETWORKS[networkId] || NETWORKS[DEFAULT_NETWORK];
-  const rpcUrl = RPC_URLS[networkId] || RPC_URLS[DEFAULT_NETWORK];
+  const networks = getAllNetworks();
+  const chain = networks[networkId] || networks[DEFAULT_NETWORK];
+  const rpcUrl = getRpcUrl(networkId);
   const account = privateKeyToAccount(privateKey);
 
   return createWalletClient({
@@ -117,7 +306,8 @@ export async function sendETH(
     });
 
     // Get the chain
-    const chain = NETWORKS[networkId] || NETWORKS[DEFAULT_NETWORK];
+    const networks = getAllNetworks();
+    const chain = networks[networkId] || networks[DEFAULT_NETWORK];
 
     // Send transaction
     const hash = await walletClient.sendTransaction({
@@ -153,18 +343,39 @@ export function formatAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+// Default explorer URLs
+const DEFAULT_EXPLORERS: Record<string, string> = {
+  mainnet: "https://etherscan.io",
+  arbitrum: "https://arbiscan.io",
+  base: "https://basescan.org",
+  optimism: "https://optimistic.etherscan.io",
+  linea: "https://lineascan.build",
+  zksync: "https://explorer.zksync.io",
+};
+
+// Get explorer base URL for a network
+export function getExplorerBaseUrl(networkId: string): string {
+  if (DEFAULT_EXPLORERS[networkId]) {
+    return DEFAULT_EXPLORERS[networkId];
+  }
+
+  // Check custom networks
+  const customNetworks = getCustomNetworks();
+  const customNet = customNetworks.find((n) => n.id === networkId);
+  if (customNet?.explorerUrl) {
+    return customNet.explorerUrl;
+  }
+
+  return DEFAULT_EXPLORERS.base;
+}
+
 // Get transaction explorer URL
 export function getExplorerUrl(
   hash: string,
   networkId: string = DEFAULT_NETWORK
 ): string {
-  const explorers: Record<string, string> = {
-    mainnet: "https://etherscan.io/tx/",
-    arbitrum: "https://arbiscan.io/tx/",
-    base: "https://basescan.org/tx/",
-  };
-
-  return `${explorers[networkId] || explorers.base}${hash}`;
+  const baseUrl = getExplorerBaseUrl(networkId);
+  return `${baseUrl}/tx/${hash}`;
 }
 
 // Get address explorer URL
@@ -172,13 +383,8 @@ export function getAddressExplorerUrl(
   address: string,
   networkId: string = DEFAULT_NETWORK
 ): string {
-  const explorers: Record<string, string> = {
-    mainnet: "https://etherscan.io/address/",
-    arbitrum: "https://arbiscan.io/address/",
-    base: "https://basescan.org/address/",
-  };
-
-  return `${explorers[networkId] || explorers.base}${address}`;
+  const baseUrl = getExplorerBaseUrl(networkId);
+  return `${baseUrl}/address/${address}`;
 }
 
 // Check if input looks like an ENS name
@@ -204,7 +410,7 @@ export async function resolveENS(
   // Create a client specifically for mainnet (where ENS lives)
   const mainnetClient = createPublicClient({
     chain: mainnet,
-    transport: http(RPC_URLS.mainnet),
+    transport: http(DEFAULT_RPC_URLS.mainnet),
   });
 
   try {
@@ -229,7 +435,7 @@ export async function getENSName(
 ): Promise<string | null> {
   const mainnetClient = createPublicClient({
     chain: mainnet,
-    transport: http(RPC_URLS.mainnet),
+    transport: http(DEFAULT_RPC_URLS.mainnet),
   });
 
   try {

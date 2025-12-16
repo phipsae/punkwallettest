@@ -6,7 +6,7 @@ import {
   type Hex,
   erc20Abi,
 } from "viem";
-import { createWalletClientForNetwork, NETWORKS } from "./wallet";
+import { createWalletClientForNetwork, getAllNetworks, getRpcUrl } from "./wallet";
 import { privateKeyToAccount } from "viem/accounts";
 
 // Token interface
@@ -153,15 +153,7 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
   ],
 };
 
-// Alchemy API Key from environment
-const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || "";
-
-// RPC URLs - same as wallet.ts
-const RPC_URLS: Record<string, string> = {
-  mainnet: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-  arbitrum: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-  base: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
-};
+// Note: RPC URLs are now managed centrally in wallet.ts via getRpcUrl()
 
 // Local storage key for custom tokens
 const CUSTOM_TOKENS_KEY = "punk_wallet_custom_tokens";
@@ -231,8 +223,9 @@ export function getTokensForNetwork(networkId: string): Token[] {
 
 // Create public client for a network
 function getPublicClient(networkId: string) {
-  const chain = NETWORKS[networkId] || NETWORKS["base"];
-  const rpcUrl = RPC_URLS[networkId] || RPC_URLS["base"];
+  const networks = getAllNetworks();
+  const chain = networks[networkId] || networks["base"];
+  const rpcUrl = getRpcUrl(networkId);
 
   return createPublicClient({
     chain,
@@ -350,13 +343,14 @@ export async function sendToken(
     });
 
     // Send the transaction
+    const networks = getAllNetworks();
     const hash = await walletClient.writeContract({
       address: token.address,
       abi: erc20Abi,
       functionName: "transfer",
       args: [to, value],
       account,
-      chain: NETWORKS[networkId],
+      chain: networks[networkId],
       gas: gasEstimate,
     });
 
