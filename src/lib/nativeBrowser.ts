@@ -1,5 +1,9 @@
-import { InAppBrowser, ToolBarType, BackgroundColor } from '@capgo/inappbrowser';
-import type { PluginListenerHandle } from '@capacitor/core';
+import {
+  InAppBrowser,
+  ToolBarType,
+  BackgroundColor,
+} from "@capgo/inappbrowser";
+import type { PluginListenerHandle } from "@capacitor/core";
 
 export interface DAppBrowserOptions {
   url: string;
@@ -27,7 +31,11 @@ export interface TransactionRequest {
 let messageListener: PluginListenerHandle | null = null;
 
 // Provider script to inject - with RPC URL for blockchain calls
-function getProviderScript(address: string, chainId: string, rpcUrl: string): string {
+function getProviderScript(
+  address: string,
+  chainId: string,
+  rpcUrl: string
+): string {
   return `
 (function() {
   if (window.ethereum && window.ethereum.isPunkWallet) return;
@@ -78,50 +86,101 @@ function getProviderScript(address: string, chainId: string, rpcUrl: string): st
           return null;
 
         case 'eth_sendTransaction':
-          // Show confirmation and send to native app
           const tx = params[0];
           const txId = 'tx_' + Date.now();
 
+          console.log('[PunkWallet] eth_sendTransaction called!');
+          console.log('[PunkWallet] TX data:', JSON.stringify(tx));
+          console.log('[PunkWallet] window.mobileApp exists:', !!window.mobileApp);
+          console.log('[PunkWallet] window.mobileApp.postMessage exists:', !!(window.mobileApp && window.mobileApp.postMessage));
+
           return new Promise((resolve, reject) => {
-            pendingTxs.set(txId, { resolve, reject });
+            pendingTxs.set(txId, { resolve, reject, type: 'tx' });
 
-            // Post message to native app
+            // Send to native app via mobileApp bridge - MUST wrap in detail object
             if (window.mobileApp && window.mobileApp.postMessage) {
-              window.mobileApp.postMessage({
-                type: 'PUNK_TX_REQUEST',
-                id: txId,
-                method: 'eth_sendTransaction',
-                params: [tx]
-              });
+              const msg = {
+                detail: {
+                  type: 'PUNK_WALLET_TX',
+                  id: txId,
+                  method: 'eth_sendTransaction',
+                  tx: tx
+                }
+              };
+              console.log('[PunkWallet] Sending message:', JSON.stringify(msg));
+              window.mobileApp.postMessage(msg);
+              console.log('[PunkWallet] TX request sent:', txId);
             } else {
-              // Fallback: show alert with tx details for now
-              const confirmed = confirm(
-                'Approve Transaction?\\n\\n' +
-                'To: ' + (tx.to || 'Contract Creation') + '\\n' +
-                'Value: ' + (tx.value ? (parseInt(tx.value, 16) / 1e18).toFixed(6) + ' ETH' : '0 ETH') + '\\n' +
-                'Gas: ' + (tx.gas ? parseInt(tx.gas, 16) : 'auto')
-              );
-
-              if (!confirmed) {
-                reject({ code: 4001, message: 'User rejected' });
-                return;
-              }
-
-              // For now, reject with message - full signing requires native integration
-              reject({ code: -32603, message: 'Transaction signing requires full wallet integration. Please use WalletConnect for now.' });
+              console.log('[PunkWallet] No mobileApp bridge!');
+              pendingTxs.delete(txId);
+              reject({ code: -32603, message: 'Native bridge not available' });
             }
           });
 
         case 'personal_sign':
-        case 'eth_sign':
+          const signId = 'sign_' + Date.now();
+          const message = params[0];
+
           return new Promise((resolve, reject) => {
-            const msg = params[0];
-            const confirmed = confirm('Sign Message?\\n\\n' + msg.substring(0, 100) + (msg.length > 100 ? '...' : ''));
-            if (!confirmed) {
-              reject({ code: 4001, message: 'User rejected' });
-              return;
+            pendingTxs.set(signId, { resolve, reject, type: 'sign' });
+
+            if (window.mobileApp && window.mobileApp.postMessage) {
+              window.mobileApp.postMessage({
+                detail: {
+                  type: 'PUNK_WALLET_SIGN',
+                  id: signId,
+                  method: 'personal_sign',
+                  message: message
+                }
+              });
+              console.log('[PunkWallet] Sign request sent:', signId);
+            } else {
+              pendingTxs.delete(signId);
+              reject({ code: -32603, message: 'Native bridge not available' });
             }
-            reject({ code: -32603, message: 'Message signing requires full wallet integration. Please use WalletConnect for now.' });
+          });
+
+        case 'eth_sign':
+          const ethSignId = 'sign_' + Date.now();
+
+          return new Promise((resolve, reject) => {
+            pendingTxs.set(ethSignId, { resolve, reject, type: 'sign' });
+
+            if (window.mobileApp && window.mobileApp.postMessage) {
+              window.mobileApp.postMessage({
+                detail: {
+                  type: 'PUNK_WALLET_SIGN',
+                  id: ethSignId,
+                  method: 'eth_sign',
+                  message: params[1]
+                }
+              });
+            } else {
+              pendingTxs.delete(ethSignId);
+              reject({ code: -32603, message: 'Native bridge not available' });
+            }
+          });
+
+        case 'eth_signTypedData':
+        case 'eth_signTypedData_v4':
+          const typedId = 'typed_' + Date.now();
+
+          return new Promise((resolve, reject) => {
+            pendingTxs.set(typedId, { resolve, reject, type: 'signTyped' });
+
+            if (window.mobileApp && window.mobileApp.postMessage) {
+              window.mobileApp.postMessage({
+                detail: {
+                  type: 'PUNK_WALLET_SIGN_TYPED',
+                  id: typedId,
+                  method: method,
+                  data: params[1]
+                }
+              });
+            } else {
+              pendingTxs.delete(typedId);
+              reject({ code: -32603, message: 'Native bridge not available' });
+            }
           });
 
         // Pass through to RPC
@@ -167,16 +226,32 @@ function getProviderScript(address: string, chainId: string, rpcUrl: string): st
     sendAsync: function(p, cb) { this.request(p).then(r => cb(null, { id: p.id, jsonrpc: '2.0', result: r })).catch(e => cb(e)); }
   };
 
-  // Handle responses from native app
-  window.addEventListener('punkWalletResponse', (e) => {
-    const { id, result, error } = e.detail;
-    if (pendingTxs.has(id)) {
+  // Handle responses from native app via messageFromNative event
+  console.log('[PunkWallet] Setting up messageFromNative listener...');
+  window.addEventListener('messageFromNative', (e) => {
+    console.log('[PunkWallet] *** RECEIVED messageFromNative event ***');
+    console.log('[PunkWallet] Event:', e);
+    console.log('[PunkWallet] Event detail:', JSON.stringify(e.detail));
+
+    const { id, result, error } = e.detail || {};
+    console.log('[PunkWallet] Parsed - id:', id, 'result:', result, 'error:', error);
+    console.log('[PunkWallet] Pending TXs:', [...pendingTxs.keys()]);
+
+    if (id && pendingTxs.has(id)) {
       const { resolve, reject } = pendingTxs.get(id);
       pendingTxs.delete(id);
-      if (error) reject(error);
-      else resolve(result);
+      if (error) {
+        console.log('[PunkWallet] TX rejected:', error);
+        reject(error);
+      } else {
+        console.log('[PunkWallet] TX success:', result);
+        resolve(result);
+      }
+    } else {
+      console.log('[PunkWallet] No pending TX found for id:', id);
     }
   });
+  console.log('[PunkWallet] messageFromNative listener registered');
 
   Object.defineProperty(window, 'ethereum', { value: provider, writable: false, configurable: false });
 
@@ -195,35 +270,130 @@ function getProviderScript(address: string, chainId: string, rpcUrl: string): st
 export const DAppBrowser = {
   async open(options: DAppBrowserOptions): Promise<{ success: boolean }> {
     try {
+      // Clean up any existing listener
+      if (messageListener) {
+        await messageListener.remove();
+        messageListener = null;
+      }
+
+      // Set up listener for messages from webview (tx requests, sign requests)
+      messageListener = await InAppBrowser.addListener(
+        "messageFromWebview",
+        async (event) => {
+          console.log(
+            "[DAppBrowser] Raw message event:",
+            JSON.stringify(event)
+          );
+
+          // The event structure from @capgo/inappbrowser: event.detail contains the message
+          // But we also wrapped our data in detail, so it may be event.detail.detail or event.detail
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let data: any = event?.detail;
+
+          // If our data is nested in another detail, unwrap it
+          if (data && data.detail && data.detail.type) {
+            data = data.detail;
+          }
+
+          // Also handle if event itself contains our data (different plugin versions)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (!data?.type && (event as any)?.type) {
+            data = event;
+          }
+
+          console.log("[DAppBrowser] Parsed data:", JSON.stringify(data));
+
+          if (!data || !data.type) {
+            console.log("[DAppBrowser] No valid data type found, ignoring");
+            return;
+          }
+
+          try {
+            if (
+              data.type === "PUNK_WALLET_TX" &&
+              options.onTransactionRequest
+            ) {
+              console.log("[DAppBrowser] Transaction request:", data.tx);
+              const txHash = await options.onTransactionRequest(data.tx);
+
+              // Send result back to webview
+              await InAppBrowser.postMessage({
+                detail: { id: data.id, result: txHash },
+              });
+            } else if (
+              (data.type === "PUNK_WALLET_SIGN" ||
+                data.type === "PUNK_WALLET_SIGN_TYPED") &&
+              options.onSignRequest
+            ) {
+              console.log(
+                "[DAppBrowser] Sign request:",
+                data.message || data.data
+              );
+              const signature = await options.onSignRequest(
+                data.message || data.data,
+                data.method
+              );
+
+              await InAppBrowser.postMessage({
+                detail: { id: data.id, result: signature },
+              });
+            }
+          } catch (error: unknown) {
+            console.error("[DAppBrowser] Handler error:", error);
+            const errorMessage =
+              error instanceof Error ? error.message : "Unknown error";
+            const errorCode = (error as { code?: number })?.code || -32603;
+
+            await InAppBrowser.postMessage({
+              detail: {
+                id: data.id,
+                error: { code: errorCode, message: errorMessage },
+              },
+            });
+          }
+        }
+      );
+
       // Set up listener for page load to inject script
       if (options.walletAddress && options.chainId) {
-        const rpcUrl = options.rpcUrl || 'https://eth.llamarpc.com';
-        const script = getProviderScript(options.walletAddress, options.chainId, rpcUrl);
+        const rpcUrl = options.rpcUrl || "https://eth.llamarpc.com";
+        const script = getProviderScript(
+          options.walletAddress,
+          options.chainId,
+          rpcUrl
+        );
 
         // Listen for page load and inject
-        const listener = await InAppBrowser.addListener('browserPageLoaded', async () => {
-          console.log('[DAppBrowser] Page loaded, injecting provider...');
-          try {
-            await InAppBrowser.executeScript({ code: script });
-            console.log('[DAppBrowser] Provider injected!');
-          } catch (e) {
-            console.error('[DAppBrowser] Injection failed:', e);
+        const pageListener = await InAppBrowser.addListener(
+          "browserPageLoaded",
+          async () => {
+            console.log("[DAppBrowser] Page loaded, injecting provider...");
+            try {
+              await InAppBrowser.executeScript({ code: script });
+              console.log("[DAppBrowser] Provider injected!");
+            } catch (e) {
+              console.error("[DAppBrowser] Injection failed:", e);
+            }
           }
-        });
+        );
 
-        // Clean up listener when browser closes
-        InAppBrowser.addListener('closeEvent', () => {
-          listener.remove();
+        // Clean up listeners when browser closes
+        InAppBrowser.addListener("closeEvent", async () => {
+          await pageListener.remove();
+          if (messageListener) {
+            await messageListener.remove();
+            messageListener = null;
+          }
         });
       }
 
       await InAppBrowser.openWebView({
         url: options.url,
-        title: options.title || 'Browser',
+        title: options.title || "Browser",
         toolbarType: ToolBarType.NAVIGATION,
         backgroundColor: BackgroundColor.BLACK,
-        toolbarColor: options.toolbarColor || '#0a0a0a',
-        toolbarTextColor: '#ffffff',
+        toolbarColor: options.toolbarColor || "#0a0a0a",
+        toolbarTextColor: "#ffffff",
         showReloadButton: true,
         activeNativeNavigationForWebview: true,
         preventDeeplink: true,
@@ -232,12 +402,29 @@ export const DAppBrowser = {
 
       return { success: true };
     } catch (error) {
-      console.error('InAppBrowser error:', error);
+      console.error("InAppBrowser error:", error);
       throw error;
     }
   },
 
   async close(): Promise<void> {
+    if (messageListener) {
+      await messageListener.remove();
+      messageListener = null;
+    }
     await InAppBrowser.close();
+  },
+
+  async executeScript(code: string): Promise<unknown> {
+    try {
+      // The InAppBrowser executeScript returns the result wrapped
+      const result = await InAppBrowser.executeScript({ code });
+      console.log("[DAppBrowser] executeScript result:", result);
+      // Result might be in different formats depending on plugin version
+      return result;
+    } catch (error) {
+      console.error("[DAppBrowser] executeScript error:", error);
+      return null;
+    }
   },
 };
