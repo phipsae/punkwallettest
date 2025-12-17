@@ -30,241 +30,127 @@ export interface TransactionRequest {
 
 let messageListener: PluginListenerHandle | null = null;
 
-// Provider script to inject - with RPC URL for blockchain calls
+// Provider script to inject - simple ES5-compatible version
 function getProviderScript(
   address: string,
   chainId: string,
   rpcUrl: string
 ): string {
-  return `
-(function() {
-  if (window.ethereum && window.ethereum.isPunkWallet) return;
+  return `(function(){
+  try {
+    if(window.ethereum&&window.ethereum.isPunkWallet){return;}
 
-  const accounts = ['${address}'];
-  let currentChainId = '${chainId}';
-  const rpcUrl = '${rpcUrl}';
-  const listeners = {};
-  let requestId = 0;
-  const pendingTxs = new Map();
+    var ADDR='${address}';
+    var CHAIN='${chainId}';
+    var RPC='${rpcUrl}';
+    var pending=new Map();
+    var listeners={};
+    var rid=0;
 
-  // RPC call helper
-  async function rpcCall(method, params) {
-    const res = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method, params })
-    });
-    const json = await res.json();
-    if (json.error) throw json.error;
-    return json.result;
-  }
-
-  const provider = {
-    isMetaMask: true,
-    isPunkWallet: true,
-    chainId: currentChainId,
-    networkVersion: String(parseInt(currentChainId, 16)),
-    selectedAddress: accounts[0],
-    isConnected: () => true,
-
-    request: async function({ method, params }) {
-      console.log('[PunkWallet] request:', method, params);
-
-      switch (method) {
-        case 'eth_requestAccounts':
-        case 'eth_accounts':
-          return accounts;
-
-        case 'eth_chainId':
-          return currentChainId;
-
-        case 'net_version':
-          return String(parseInt(currentChainId, 16));
-
-        case 'wallet_switchEthereumChain':
-          // Store for later - would need native handling
-          return null;
-
-        case 'eth_sendTransaction':
-          const tx = params[0];
-          const txId = 'tx_' + Date.now();
-
-          console.log('[PunkWallet] eth_sendTransaction called!');
-          console.log('[PunkWallet] TX data:', JSON.stringify(tx));
-          console.log('[PunkWallet] window.mobileApp exists:', !!window.mobileApp);
-          console.log('[PunkWallet] window.mobileApp.postMessage exists:', !!(window.mobileApp && window.mobileApp.postMessage));
-
-          return new Promise((resolve, reject) => {
-            pendingTxs.set(txId, { resolve, reject, type: 'tx' });
-
-            // Send to native app via mobileApp bridge - MUST wrap in detail object
-            if (window.mobileApp && window.mobileApp.postMessage) {
-              const msg = {
-                detail: {
-                  type: 'PUNK_WALLET_TX',
-                  id: txId,
-                  method: 'eth_sendTransaction',
-                  tx: tx
-                }
-              };
-              console.log('[PunkWallet] Sending message:', JSON.stringify(msg));
-              window.mobileApp.postMessage(msg);
-              console.log('[PunkWallet] TX request sent:', txId);
-            } else {
-              console.log('[PunkWallet] No mobileApp bridge!');
-              pendingTxs.delete(txId);
-              reject({ code: -32603, message: 'Native bridge not available' });
-            }
-          });
-
-        case 'personal_sign':
-          const signId = 'sign_' + Date.now();
-          const message = params[0];
-
-          return new Promise((resolve, reject) => {
-            pendingTxs.set(signId, { resolve, reject, type: 'sign' });
-
-            if (window.mobileApp && window.mobileApp.postMessage) {
-              window.mobileApp.postMessage({
-                detail: {
-                  type: 'PUNK_WALLET_SIGN',
-                  id: signId,
-                  method: 'personal_sign',
-                  message: message
-                }
-              });
-              console.log('[PunkWallet] Sign request sent:', signId);
-            } else {
-              pendingTxs.delete(signId);
-              reject({ code: -32603, message: 'Native bridge not available' });
-            }
-          });
-
-        case 'eth_sign':
-          const ethSignId = 'sign_' + Date.now();
-
-          return new Promise((resolve, reject) => {
-            pendingTxs.set(ethSignId, { resolve, reject, type: 'sign' });
-
-            if (window.mobileApp && window.mobileApp.postMessage) {
-              window.mobileApp.postMessage({
-                detail: {
-                  type: 'PUNK_WALLET_SIGN',
-                  id: ethSignId,
-                  method: 'eth_sign',
-                  message: params[1]
-                }
-              });
-            } else {
-              pendingTxs.delete(ethSignId);
-              reject({ code: -32603, message: 'Native bridge not available' });
-            }
-          });
-
-        case 'eth_signTypedData':
-        case 'eth_signTypedData_v4':
-          const typedId = 'typed_' + Date.now();
-
-          return new Promise((resolve, reject) => {
-            pendingTxs.set(typedId, { resolve, reject, type: 'signTyped' });
-
-            if (window.mobileApp && window.mobileApp.postMessage) {
-              window.mobileApp.postMessage({
-                detail: {
-                  type: 'PUNK_WALLET_SIGN_TYPED',
-                  id: typedId,
-                  method: method,
-                  data: params[1]
-                }
-              });
-            } else {
-              pendingTxs.delete(typedId);
-              reject({ code: -32603, message: 'Native bridge not available' });
-            }
-          });
-
-        // Pass through to RPC
-        case 'eth_getBalance':
-        case 'eth_blockNumber':
-        case 'eth_call':
-        case 'eth_estimateGas':
-        case 'eth_gasPrice':
-        case 'eth_maxPriorityFeePerGas':
-        case 'eth_getTransactionCount':
-        case 'eth_getTransactionReceipt':
-        case 'eth_getTransactionByHash':
-        case 'eth_getBlockByNumber':
-        case 'eth_getBlockByHash':
-        case 'eth_getLogs':
-        case 'eth_getCode':
-        case 'eth_getStorageAt':
-          return rpcCall(method, params);
-
-        default:
-          console.log('[PunkWallet] Unknown method:', method);
-          throw { code: 4200, message: 'Method not supported: ' + method };
-      }
-    },
-
-    on: function(event, cb) {
-      if (!listeners[event]) listeners[event] = [];
-      listeners[event].push(cb);
-      return this;
-    },
-
-    removeListener: function(event, cb) {
-      if (listeners[event]) listeners[event] = listeners[event].filter(l => l !== cb);
-      return this;
-    },
-
-    emit: function(event, data) {
-      if (listeners[event]) listeners[event].forEach(cb => cb(data));
-    },
-
-    enable: async function() { return this.request({ method: 'eth_requestAccounts' }); },
-    send: function(m, p) { return typeof m === 'string' ? this.request({ method: m, params: p }) : this.request(m); },
-    sendAsync: function(p, cb) { this.request(p).then(r => cb(null, { id: p.id, jsonrpc: '2.0', result: r })).catch(e => cb(e)); }
-  };
-
-  // Handle responses from native app via messageFromNative event
-  console.log('[PunkWallet] Setting up messageFromNative listener...');
-  window.addEventListener('messageFromNative', (e) => {
-    console.log('[PunkWallet] *** RECEIVED messageFromNative event ***');
-    console.log('[PunkWallet] Event:', e);
-    console.log('[PunkWallet] Event detail:', JSON.stringify(e.detail));
-
-    const { id, result, error } = e.detail || {};
-    console.log('[PunkWallet] Parsed - id:', id, 'result:', result, 'error:', error);
-    console.log('[PunkWallet] Pending TXs:', [...pendingTxs.keys()]);
-
-    if (id && pendingTxs.has(id)) {
-      const { resolve, reject } = pendingTxs.get(id);
-      pendingTxs.delete(id);
-      if (error) {
-        console.log('[PunkWallet] TX rejected:', error);
-        reject(error);
-      } else {
-        console.log('[PunkWallet] TX success:', result);
-        resolve(result);
-      }
-    } else {
-      console.log('[PunkWallet] No pending TX found for id:', id);
+    function rpc(m,p){
+      return fetch(RPC,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:++rid,method:m,params:p||[]})})
+        .then(function(r){return r.json();})
+        .then(function(j){if(j.error)throw j.error;return j.result;});
     }
-  });
-  console.log('[PunkWallet] messageFromNative listener registered');
 
-  Object.defineProperty(window, 'ethereum', { value: provider, writable: false, configurable: false });
+    var currentChain=CHAIN;
+    var prov={
+      isMetaMask:true,isPunkWallet:true,chainId:CHAIN,networkVersion:String(parseInt(CHAIN,16)),selectedAddress:ADDR,_events:{},
+      isConnected:function(){return true;},
+      request:function(a){
+        var self=this;
+        var m=a.method,p=a.params||[];
+        if(window.mobileApp&&window.mobileApp.postMessage){
+          window.mobileApp.postMessage({detail:{type:'PUNK_WALLET_LOG',method:m}});
+        }
+        if(m==='eth_requestAccounts'||m==='eth_accounts'){
+          return Promise.resolve([ADDR]);
+        }
+        if(m==='eth_chainId')return Promise.resolve(currentChain);
+        if(m==='net_version')return Promise.resolve(String(parseInt(currentChain,16)));
+        if(m==='wallet_switchEthereumChain'){
+          var newChain=p[0]&&p[0].chainId?p[0].chainId:currentChain;
+          if(newChain!==currentChain){
+            currentChain=newChain;
+            prov.chainId=newChain;
+            prov.networkVersion=String(parseInt(newChain,16));
+            try{prov.emit('chainChanged',newChain);}catch(x){}
+          }
+          return Promise.resolve(null);
+        }
+        if(m==='wallet_addEthereumChain')return Promise.resolve(null);
+        if(m==='wallet_requestPermissions'){
+          return Promise.resolve([{parentCapability:'eth_accounts',caveats:[{type:'restrictReturnedAccounts',value:[ADDR]}]}]);
+        }
+        if(m==='wallet_getPermissions'){
+          return Promise.resolve([{parentCapability:'eth_accounts',caveats:[{type:'restrictReturnedAccounts',value:[ADDR]}]}]);
+        }
+        if(m==='eth_sendTransaction'){
+          var tid='t'+Date.now();
+          return new Promise(function(res,rej){
+            pending.set(tid,{r:res,e:rej});
+            if(window.mobileApp&&window.mobileApp.postMessage){
+              window.mobileApp.postMessage({detail:{type:'PUNK_WALLET_TX',id:tid,method:m,tx:p[0]}});
+            }else{pending.delete(tid);rej({code:-32603,message:'No bridge'});}
+          });
+        }
+        if(m==='personal_sign'||m==='eth_sign'){
+          var sid='s'+Date.now();
+          return new Promise(function(res,rej){
+            pending.set(sid,{r:res,e:rej});
+            if(window.mobileApp&&window.mobileApp.postMessage){
+              window.mobileApp.postMessage({detail:{type:'PUNK_WALLET_SIGN',id:sid,method:m,message:p[0]}});
+            }else{pending.delete(sid);rej({code:-32603,message:'No bridge'});}
+          });
+        }
+        if(m==='eth_signTypedData'||m==='eth_signTypedData_v4'){
+          var yid='y'+Date.now();
+          return new Promise(function(res,rej){
+            pending.set(yid,{r:res,e:rej});
+            if(window.mobileApp&&window.mobileApp.postMessage){
+              window.mobileApp.postMessage({detail:{type:'PUNK_WALLET_SIGN_TYPED',id:yid,method:m,data:p[1]}});
+            }else{pending.delete(yid);rej({code:-32603,message:'No bridge'});}
+          });
+        }
+        return rpc(m,p);
+      },
+      on:function(e,c){if(!listeners[e])listeners[e]=[];listeners[e].push(c);return this;},
+      removeListener:function(e,c){if(listeners[e])listeners[e]=listeners[e].filter(function(l){return l!==c;});return this;},
+      off:function(e,c){return this.removeListener(e,c);},
+      emit:function(e,d){if(listeners[e]){listeners[e].slice().forEach(function(c){try{c(d);}catch(x){}});}},
+      enable:function(){return this.request({method:'eth_requestAccounts'});},
+      send:function(m,p){return typeof m==='string'?this.request({method:m,params:p}):this.request(m);},
+      sendAsync:function(p,c){this.request(p).then(function(r){c(null,{id:p.id,jsonrpc:'2.0',result:r});}).catch(c);}
+    };
 
-  // EIP-6963
-  const info = { uuid: 'punk-wallet', name: 'Punk Wallet', icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23d6f550" width="100" height="100" rx="20"/><text x="50" y="70" font-size="60" text-anchor="middle">P</text></svg>', rdns: 'app.punkwallet' };
-  function announce() { window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info: Object.freeze(info), provider }) })); }
-  window.addEventListener('eip6963:requestProvider', announce);
-  announce();
+    window.addEventListener('messageFromNative',function(e){
+      var d=e.detail||{};
+      console.log('PunkWallet: Response',d.id);
+      if(d.id&&pending.has(d.id)){
+        var h=pending.get(d.id);pending.delete(d.id);
+        if(d.error)h.e(d.error);else h.r(d.result);
+      }
+    });
 
-  setTimeout(() => provider.emit('connect', { chainId: currentChainId }), 1);
-  console.log('[PunkWallet] Provider ready:', accounts[0], 'Chain:', currentChainId);
-})();
-`;
+    try{delete window.ethereum;}catch(x){}
+    try{Object.defineProperty(window,'ethereum',{value:prov,writable:true,configurable:true,enumerable:true});}catch(x){window.ethereum=prov;}
+
+    var info={uuid:'punk-wallet-1',name:'Punk Wallet',icon:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAA2ElEQVR4nO2WMQ6DMAxFfwTHYOIMrL0dK/fiwByBI3TpwBE6srpigEowSBQlThM7IZH6pQxJ/J7txHYALMZ/JQHwBNABEDqfJ4BDPQ8A+wDAzHkgAaAB8KznYQCc6rkawMuZPwZwqOeiANDMswnWAF4APgHsyjkRYDq+9IAEwM7M3c5czn4G2HkCaA3gzNyd8xyATT0XAbCp5ywA1vU8GQBf8BSAVT0XAbCs5ywAVvU8GmBmFuec45znKgBbALt6LgLgUs9FAFzqOQsA50oaDMByn9dxgNX4At+jQcgOTR+nAAAAAElFTkSuQmCC',rdns:'app.punkwallet'};
+    console.log('PunkWallet: Setting up EIP6963 with provider',typeof prov);
+    function ann(){
+      try{
+        var detail=Object.freeze({info:Object.freeze(info),provider:prov});
+        console.log('PunkWallet: Announcing EIP6963, provider.request=',typeof prov.request);
+        window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{detail:detail}));
+      }catch(e){console.error('PunkWallet: EIP6963 error',e);}
+    }
+    window.addEventListener('eip6963:requestProvider',function(){console.log('PunkWallet: EIP6963 requested');ann();});
+    ann();setTimeout(ann,100);setTimeout(ann,500);setTimeout(ann,1000);setTimeout(ann,2000);
+
+    setTimeout(function(){prov.emit('connect',{chainId:CHAIN});},10);
+    console.log('PunkWallet: Ready',ADDR,CHAIN);
+  }catch(err){console.error('PunkWallet ERROR:',err);}
+})();`;
 }
 
 export const DAppBrowser = {
@@ -305,6 +191,15 @@ export const DAppBrowser = {
 
           if (!data || !data.type) {
             console.log("[DAppBrowser] No valid data type found, ignoring");
+            return;
+          }
+
+          // Log all RPC method calls from the provider
+          if (data.type === "PUNK_WALLET_LOG") {
+            console.log(
+              "[DAppBrowser] ⚡️ Provider method called:",
+              data.method
+            );
             return;
           }
 
@@ -354,24 +249,66 @@ export const DAppBrowser = {
         }
       );
 
-      // Clean up listeners when browser closes
-      InAppBrowser.addListener("closeEvent", async () => {
-        if (messageListener) {
-          await messageListener.remove();
-          messageListener = null;
-        }
-      });
-
       // Build provider script if wallet info provided
-      let preShowScript: string | undefined;
+      let providerScript: string | undefined;
       if (options.walletAddress && options.chainId) {
         const rpcUrl = options.rpcUrl || "https://eth.llamarpc.com";
-        preShowScript = getProviderScript(
+        providerScript = getProviderScript(
           options.walletAddress,
           options.chainId,
           rpcUrl
         );
-        console.log("[DAppBrowser] Will inject provider at document start");
+        console.log("[DAppBrowser] Provider script ready");
+      }
+
+      // Inject provider on page load
+      if (providerScript) {
+        const pageLoadListener = await InAppBrowser.addListener(
+          "browserPageLoaded",
+          async () => {
+            console.log("[DAppBrowser] Page loaded, injecting provider...");
+            try {
+              await InAppBrowser.executeScript({ code: providerScript! });
+              console.log("[DAppBrowser] Provider injected!");
+
+              // After injection, trigger EIP-6963 re-announcement multiple times
+              // This helps dApps that already checked for wallets to discover us
+              setTimeout(async () => {
+                try {
+                  await InAppBrowser.executeScript({
+                    code: `if(window.ethereum&&window.ethereum.isPunkWallet){
+                      window.dispatchEvent(new CustomEvent('eip6963:announceProvider',{
+                        detail:Object.freeze({
+                          info:Object.freeze({uuid:'punk-'+Date.now(),name:'Punk Wallet',icon:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAA2ElEQVR4nO2WMQ6DMAxFfwTHYOIMrL0dK/fiwByBI3TpwBE6srpigEowSBQlThM7IZH6pQxJ/J7txHYALMZ/JQHwBNABEDqfJ4BDPQ8A+wDAzHkgAaAB8KznYQCc6rkawMuZPwZwqOeiANDMswnWAF4APgHsyjkRYDq+9IAEwM7M3c5czn4G2HkCaA3gzNyd8xyATT0XAbCp5ywA1vU8GQBf8BSAVT0XAbCs5ywAVvU8GmBmFuec45znKgBbALt6LgLgUs9FAFzqOQsA50oaDMByn9dxgNX4At+jQcgOTR+nAAAAAElFTkSuQmCC',rdns:'app.punkwallet'}),
+                          provider:window.ethereum
+                        })
+                      }));
+                    }`,
+                  });
+                } catch (e) {}
+              }, 500);
+            } catch (e) {
+              console.error("[DAppBrowser] Injection failed:", e);
+            }
+          }
+        );
+
+        // Clean up listeners when browser closes
+        InAppBrowser.addListener("closeEvent", async () => {
+          await pageLoadListener.remove();
+          if (messageListener) {
+            await messageListener.remove();
+            messageListener = null;
+          }
+        });
+      } else {
+        // Clean up listeners when browser closes
+        InAppBrowser.addListener("closeEvent", async () => {
+          if (messageListener) {
+            await messageListener.remove();
+            messageListener = null;
+          }
+        });
       }
 
       await InAppBrowser.openWebView({
@@ -385,11 +322,6 @@ export const DAppBrowser = {
         activeNativeNavigationForWebview: true,
         preventDeeplink: true,
         isAnimated: true,
-        // Inject provider script at document start (BEFORE page JS runs)
-        // This ensures dApps detect our wallet on initial load
-        isPresentAfterPageLoad: preShowScript ? true : false,
-        preShowScript: preShowScript,
-        preShowScriptInjectionTime: "documentStart",
       });
 
       return { success: true };
