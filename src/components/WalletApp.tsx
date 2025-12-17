@@ -29,6 +29,7 @@ const QRScanner = dynamic(() => import("./QRScanner"), { ssr: false });
 const PaymentScanner = dynamic(() => import("./PaymentScanner"), {
   ssr: false,
 });
+const DAppBrowser = dynamic(() => import("./DAppBrowser"), { ssr: false });
 import {
   getBalance,
   sendETH,
@@ -96,7 +97,8 @@ type View =
   | "connect"
   | "sessions"
   | "tokens"
-  | "export";
+  | "export"
+  | "browser";
 
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
@@ -169,6 +171,7 @@ export default function WalletApp() {
   const [wcUnavailable, setWcUnavailable] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showPaymentScanner, setShowPaymentScanner] = useState(false);
+  const [showDAppBrowser, setShowDAppBrowser] = useState(false);
   const previousWalletAddress = useRef<string | null>(null);
 
   // Export private key state
@@ -2168,6 +2171,27 @@ export default function WalletApp() {
               </button>
             </div>
 
+            {/* dApp Browser button */}
+            <button
+              onClick={() => setShowDAppBrowser(true)}
+              className="w-full py-4 px-6 rounded-sm bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 transition-all duration-150 font-medium text-white flex items-center justify-center gap-2"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+                />
+              </svg>
+              Browse dApps
+            </button>
+
             {/* WalletConnect button */}
             <button
               onClick={() => setView("connect")}
@@ -2176,7 +2200,7 @@ export default function WalletApp() {
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6.09 10.11c3.26-3.19 8.56-3.19 11.82 0l.39.38a.4.4 0 010 .58l-1.35 1.32a.21.21 0 01-.3 0l-.54-.53c-2.27-2.22-5.96-2.22-8.23 0l-.58.56a.21.21 0 01-.3 0L5.66 11.1a.4.4 0 010-.58l.43-.41zm14.6 2.71l1.2 1.18a.4.4 0 010 .58l-5.42 5.3a.42.42 0 01-.59 0l-3.85-3.76a.1.1 0 00-.15 0l-3.85 3.77a.42.42 0 01-.59 0L2.02 14.6a.4.4 0 010-.58l1.2-1.18a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0l3.85 3.77a.1.1 0 00.15 0l3.85-3.77a.42.42 0 01.59 0z" />
               </svg>
-              Connect to dApp
+              Connect via QR
               {activeSessions.length > 0 && (
                 <span className="ml-2 px-2 py-0.5 rounded-sm bg-background/20 text-xs">
                   {activeSessions.length}
@@ -4678,6 +4702,19 @@ export default function WalletApp() {
         <PaymentScanner
           onScan={handlePaymentScan}
           onClose={() => setShowPaymentScanner(false)}
+        />
+      )}
+
+      {/* dApp Browser */}
+      {showDAppBrowser && wallet && (
+        <DAppBrowser
+          walletAddress={wallet.address}
+          privateKey={wallet.privateKey}
+          networkId={network}
+          onNetworkChange={(newNetworkId) => {
+            setNetwork(newNetworkId);
+          }}
+          onClose={() => setShowDAppBrowser(false)}
         />
       )}
     </div>
