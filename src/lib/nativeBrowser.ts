@@ -354,37 +354,24 @@ export const DAppBrowser = {
         }
       );
 
-      // Set up listener for page load to inject script
+      // Clean up listeners when browser closes
+      InAppBrowser.addListener("closeEvent", async () => {
+        if (messageListener) {
+          await messageListener.remove();
+          messageListener = null;
+        }
+      });
+
+      // Build provider script if wallet info provided
+      let preShowScript: string | undefined;
       if (options.walletAddress && options.chainId) {
         const rpcUrl = options.rpcUrl || "https://eth.llamarpc.com";
-        const script = getProviderScript(
+        preShowScript = getProviderScript(
           options.walletAddress,
           options.chainId,
           rpcUrl
         );
-
-        // Listen for page load and inject
-        const pageListener = await InAppBrowser.addListener(
-          "browserPageLoaded",
-          async () => {
-            console.log("[DAppBrowser] Page loaded, injecting provider...");
-            try {
-              await InAppBrowser.executeScript({ code: script });
-              console.log("[DAppBrowser] Provider injected!");
-            } catch (e) {
-              console.error("[DAppBrowser] Injection failed:", e);
-            }
-          }
-        );
-
-        // Clean up listeners when browser closes
-        InAppBrowser.addListener("closeEvent", async () => {
-          await pageListener.remove();
-          if (messageListener) {
-            await messageListener.remove();
-            messageListener = null;
-          }
-        });
+        console.log("[DAppBrowser] Will inject provider at document start");
       }
 
       await InAppBrowser.openWebView({
@@ -398,6 +385,11 @@ export const DAppBrowser = {
         activeNativeNavigationForWebview: true,
         preventDeeplink: true,
         isAnimated: true,
+        // Inject provider script at document start (BEFORE page JS runs)
+        // This ensures dApps detect our wallet on initial load
+        isPresentAfterPageLoad: preShowScript ? true : false,
+        preShowScript: preShowScript,
+        preShowScriptInjectionTime: "documentStart",
       });
 
       return { success: true };

@@ -310,15 +310,6 @@ export default function DAppBrowser({
               });
 
               console.log("Transaction sent:", hash);
-
-              // Show success alert in webview
-              await NativeDAppBrowser.executeScript(
-                `alert('✅ Transaction Sent!\\n\\nHash: ${hash.slice(
-                  0,
-                  20
-                )}...')`
-              );
-
               return hash;
             },
 
