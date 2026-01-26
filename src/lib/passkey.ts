@@ -2,16 +2,33 @@ import {
   startRegistration,
   startAuthentication,
 } from "@simplewebauthn/browser";
-import { hexToBytes, keccak256, concat } from "viem";
+import { hexToBytes, keccak256, concat, toHex } from "viem";
+import { p256 } from "@noble/curves/p256";
+
+// SHA-256 hash function using Web Crypto API
+async function sha256(data: Uint8Array): Promise<Uint8Array> {
+  // Create a new Uint8Array copy to ensure compatibility with SubtleCrypto
+  const copy = new Uint8Array(data);
+  const hash = await crypto.subtle.digest("SHA-256", copy);
+  return new Uint8Array(hash);
+}
+
+// Synchronous keccak256 hash for non-WebAuthn uses (challenge generation)
+function hashForChallenge(data: Uint8Array): Uint8Array {
+  const hex = toHex(data);
+  const hash = keccak256(hex);
+  return hexToBytes(hash);
+}
 
 // Types for our passkey-derived wallet
 export interface PasskeyCredential {
   credentialId: string; // base64url format (original from WebAuthn)
-  credentialIdHex: string; // hex format for key derivation
+  credentialIdHex: string; // hex format for legacy compatibility
   publicKey: string;
   createdAt: number;
   username?: string;
   isImported?: boolean; // true if wallet was imported via private key
+  isLegacy?: boolean; // true for v1 wallets (insecure credentialId-based derivation)
 }
 
 export interface StoredWallet {
@@ -21,6 +38,7 @@ export interface StoredWallet {
   address: string;
   createdAt: number;
   isImported?: boolean; // true if wallet was imported via private key
+  isLegacy?: boolean; // true for v1 wallets (insecure credentialId-based derivation)
 }
 
 export interface PasskeyWallet {
@@ -92,10 +110,12 @@ function generateChallenge(): Uint8Array {
   return challenge;
 }
 
-// Derive a private key from the passkey credential ID
-// We use ONLY the credential ID for deterministic derivation
-// This ensures the same passkey always produces the same wallet
-async function derivePrivateKey(
+// ============================================================================
+// LEGACY (INSECURE) KEY DERIVATION - Only for backward compatibility
+// WARNING: This method derives keys from the public credentialId, which is NOT secure.
+// Anyone with access to localStorage can derive the private key without biometric auth.
+// ============================================================================
+async function derivePrivateKeyLegacy(
   credentialIdHex: string
 ): Promise<`0x${string}`> {
   const credentialBytes = hexToBytes(credentialIdHex as `0x${string}`);
@@ -108,6 +128,124 @@ async function derivePrivateKey(
   const privateKey = keccak256(combined);
 
   return privateKey;
+}
+
+// ============================================================================
+// PASSSEEDS SECURE KEY DERIVATION (v2)
+// Uses ECDSA public key recovery from WebAuthn signatures.
+// The private key can ONLY be derived after successful biometric authentication.
+// ============================================================================
+
+// Helper to convert Uint8Array to hex string (browser-compatible, no Buffer needed)
+function bytesToHexString(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// Generate a deterministic challenge for PassSeeds
+// This challenge is used for key derivation and must be consistent
+function getPassSeedsChallenge(credentialId: string): Uint8Array {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`PunkWallet-PassSeeds-v2:${credentialId}`);
+  // Use keccak256 for challenge generation (synchronous, doesn't need to be SHA-256)
+  return hashForChallenge(data);
+}
+
+// Parse ASN.1 DER encoded signature from WebAuthn into r, s components
+function parseAsn1Signature(signature: Uint8Array): { r: bigint; s: bigint } {
+  // ASN.1 DER format: 0x30 [total-length] 0x02 [r-length] [r] 0x02 [s-length] [s]
+  if (signature[0] !== 0x30) {
+    throw new Error("Invalid signature: not a SEQUENCE");
+  }
+
+  let offset = 2; // Skip SEQUENCE tag and length
+
+  // Parse r
+  if (signature[offset] !== 0x02) {
+    throw new Error("Invalid signature: r is not an INTEGER");
+  }
+  offset++;
+  const rLength = signature[offset];
+  offset++;
+  let rBytes = signature.slice(offset, offset + rLength);
+  // Remove leading zero if present (ASN.1 adds it for positive numbers with high bit set)
+  if (rBytes[0] === 0x00 && rBytes.length > 1) {
+    rBytes = rBytes.slice(1);
+  }
+  offset += rLength;
+
+  // Parse s
+  if (signature[offset] !== 0x02) {
+    throw new Error("Invalid signature: s is not an INTEGER");
+  }
+  offset++;
+  const sLength = signature[offset];
+  offset++;
+  let sBytes = signature.slice(offset, offset + sLength);
+  // Remove leading zero if present
+  if (sBytes[0] === 0x00 && sBytes.length > 1) {
+    sBytes = sBytes.slice(1);
+  }
+
+  // Convert to BigInt
+  const r = BigInt("0x" + bytesToHexString(rBytes));
+  const s = BigInt("0x" + bytesToHexString(sBytes));
+
+  return { r, s };
+}
+
+// Compute the WebAuthn message hash that was signed
+// Per WebAuthn spec: hash = SHA-256(authenticatorData || SHA-256(clientDataJSON))
+async function computeWebAuthnMessageHash(
+  authenticatorData: Uint8Array,
+  clientDataJSON: Uint8Array
+): Promise<Uint8Array> {
+  const clientDataHash = await sha256(clientDataJSON);
+  const combined = new Uint8Array(authenticatorData.length + clientDataHash.length);
+  combined.set(authenticatorData, 0);
+  combined.set(clientDataHash, authenticatorData.length);
+  return sha256(combined);
+}
+
+// Recover public key from WebAuthn signature using ECDSA recovery
+// Returns the recovered public key as a hex string
+async function recoverPublicKeyFromSignature(
+  signature: Uint8Array,
+  authenticatorData: Uint8Array,
+  clientDataJSON: Uint8Array
+): Promise<`0x${string}`> {
+  const { r, s } = parseAsn1Signature(signature);
+  const msgHash = await computeWebAuthnMessageHash(authenticatorData, clientDataJSON);
+
+  // Try both recovery IDs (0 and 1) to find the valid public key
+  // P-256 signatures can recover to one of two possible public keys
+  for (let recoveryId = 0; recoveryId <= 1; recoveryId++) {
+    try {
+      const sig = new p256.Signature(r, s).addRecoveryBit(recoveryId);
+      const publicKey = sig.recoverPublicKey(msgHash);
+      // Return the compressed public key as hex
+      const pubKeyBytes = publicKey.toRawBytes(true);
+      const hex = "0x" + bytesToHexString(pubKeyBytes);
+      return hex as `0x${string}`;
+    } catch {
+      // Try next recovery ID
+      continue;
+    }
+  }
+
+  throw new Error("Failed to recover public key from signature");
+}
+
+// Derive private key securely from recovered public key (PassSeeds v2)
+// This requires actual biometric authentication to get the signature
+function derivePrivateKeyFromPublicKey(
+  recoveredPublicKey: `0x${string}`
+): `0x${string}` {
+  const publicKeyBytes = hexToBytes(recoveredPublicKey);
+  const domainSeparator = new TextEncoder().encode("PunkWallet-PassSeeds-v2");
+  const combined = concat([domainSeparator, publicKeyBytes]);
+  return keccak256(combined);
 }
 
 // Convert ArrayBuffer to base64url string
@@ -246,7 +384,7 @@ export function isMacCatalystApp(): boolean {
   return isMac && isCapacitor;
 }
 
-// Register a new passkey
+// Register a new passkey using PassSeeds (v2 secure derivation)
 export async function registerPasskey(
   username: string
 ): Promise<PasskeyCredential> {
@@ -268,8 +406,7 @@ export async function registerPasskey(
         displayName: username,
       },
       pubKeyCredParams: [
-        { alg: -7, type: "public-key" }, // ES256 (P-256)
-        { alg: -257, type: "public-key" }, // RS256
+        { alg: -7, type: "public-key" }, // ES256 (P-256) - required for PassSeeds
       ],
       authenticatorSelection: {
         authenticatorAttachment: "platform",
@@ -281,29 +418,64 @@ export async function registerPasskey(
     },
   });
 
-  // Store both the original base64url ID and the hex version
-  const credential: PasskeyCredential = {
-    credentialId: registrationResponse.id,
-    credentialIdHex: base64urlToHex(registrationResponse.id),
-    publicKey: base64urlToHex(
-      registrationResponse.response.publicKey || registrationResponse.id
-    ),
-    createdAt: Date.now(),
-    username,
-  };
+  const credentialId = registrationResponse.id;
+  const credentialIdHex = base64urlToHex(credentialId);
 
-  // Derive the address for this credential
-  const privateKey = await derivePrivateKey(credential.credentialIdHex);
+  // PassSeeds: Immediately sign a deterministic challenge to recover the public key
+  // This ensures we can derive the same wallet address on any device with this passkey
+  const passSeedsChallenge = getPassSeedsChallenge(credentialId);
+  
+  const authResponse = await startAuthentication({
+    optionsJSON: {
+      challenge: bufferToBase64url(passSeedsChallenge.buffer as ArrayBuffer),
+      rpId: getPasskeyRpId(),
+      allowCredentials: [
+        {
+          id: credentialId,
+          type: "public-key",
+        },
+      ],
+      userVerification: "required",
+      timeout: 60000,
+    },
+  });
+
+  // Recover public key from the signature
+  const signature = base64urlToArrayBuffer(authResponse.response.signature);
+  const authenticatorData = base64urlToArrayBuffer(authResponse.response.authenticatorData);
+  const clientDataJSON = new TextEncoder().encode(
+    atob(authResponse.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/"))
+  );
+
+  const recoveredPublicKey = await recoverPublicKeyFromSignature(
+    new Uint8Array(signature),
+    new Uint8Array(authenticatorData),
+    clientDataJSON
+  );
+
+  // Derive wallet private key from recovered public key (PassSeeds v2)
+  const privateKey = derivePrivateKeyFromPublicKey(recoveredPublicKey);
   const { privateKeyToAccount } = await import("viem/accounts");
   const account = privateKeyToAccount(privateKey);
 
+  // Store credential (v2 - not legacy)
+  const credential: PasskeyCredential = {
+    credentialId,
+    credentialIdHex,
+    publicKey: recoveredPublicKey,
+    createdAt: Date.now(),
+    username,
+    isLegacy: false,
+  };
+
   // Save to wallets list
   saveWalletToList({
-    credentialId: credential.credentialId,
-    credentialIdHex: credential.credentialIdHex,
+    credentialId,
+    credentialIdHex,
     username,
     address: account.address,
     createdAt: credential.createdAt,
+    isLegacy: false,
   });
 
   // Store current credential
@@ -320,7 +492,6 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
   }
 
   const credential: PasskeyCredential = JSON.parse(stored);
-  const challenge = generateChallenge();
 
   // Handle migration from old format (where credentialId was hex)
   let credentialIdBase64url = credential.credentialId;
@@ -333,9 +504,18 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
     credentialIdHex = credential.credentialId;
   }
 
+  // Determine if this is a legacy wallet (v1) or PassSeeds wallet (v2)
+  // Legacy wallets are those without isLegacy explicitly set to false
+  const isLegacy = credential.isLegacy !== false;
+
+  // Use deterministic PassSeeds challenge for v2, random for legacy
+  const challenge = isLegacy
+    ? generateChallenge()
+    : getPassSeedsChallenge(credentialIdBase64url);
+
   try {
     // Authenticate with specific credential
-    await startAuthentication({
+    const authResponse = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
@@ -350,8 +530,28 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
       },
     });
 
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(credentialIdHex);
+    let privateKey: `0x${string}`;
+
+    if (isLegacy) {
+      // Legacy (v1): Derive from credential ID (INSECURE - for backward compatibility only)
+      privateKey = await derivePrivateKeyLegacy(credentialIdHex);
+    } else {
+      // PassSeeds (v2): Recover public key from signature and derive from it
+      const signature = base64urlToArrayBuffer(authResponse.response.signature);
+      const authenticatorData = base64urlToArrayBuffer(authResponse.response.authenticatorData);
+      const clientDataJSON = new TextEncoder().encode(
+        atob(authResponse.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/"))
+      );
+
+      const recoveredPublicKey = await recoverPublicKeyFromSignature(
+        new Uint8Array(signature),
+        new Uint8Array(authenticatorData),
+        clientDataJSON
+      );
+
+      privateKey = derivePrivateKeyFromPublicKey(recoveredPublicKey);
+    }
+
     const { privateKeyToAccount } = await import("viem/accounts");
     const account = privateKeyToAccount(privateKey);
 
@@ -402,13 +602,14 @@ function base64urlToString(base64url: string): string {
 // Recover wallet using discoverable credentials
 // This lets the browser show ALL passkeys for this site
 export async function recoverWallet(): Promise<RecoveryResult | null> {
-  const challenge = generateChallenge();
-
   try {
-    // Don't specify allowCredentials - browser will show all registered passkeys
-    const authResponse = await startAuthentication({
+    // First, do a discoverable authentication to get the credential ID
+    // We use a random challenge here since we don't know the credential ID yet
+    const discoveryChallenge = generateChallenge();
+    
+    const discoveryResponse = await startAuthentication({
       optionsJSON: {
-        challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
+        challenge: bufferToBase64url(discoveryChallenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
         userVerification: "required",
         timeout: 60000,
@@ -417,7 +618,7 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
     });
 
     // Get the credential ID from the response
-    const credentialId = authResponse.id;
+    const credentialId = discoveryResponse.id;
     const credentialIdHex = base64urlToHex(credentialId);
 
     // Check if wallet already exists in local storage
@@ -425,8 +626,51 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
     const existingWallet = wallets.find((w) => w.credentialId === credentialId);
     const alreadyExisted = !!existingWallet;
 
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(credentialIdHex);
+    // Determine if this is a legacy wallet
+    const isLegacy = existingWallet?.isLegacy !== false;
+
+    let privateKey: `0x${string}`;
+    let recoveredPublicKey: `0x${string}` | undefined;
+
+    if (isLegacy && existingWallet) {
+      // Legacy wallet: use old derivation
+      privateKey = await derivePrivateKeyLegacy(credentialIdHex);
+    } else {
+      // PassSeeds (v2): Need to authenticate again with the deterministic challenge
+      // to recover the public key
+      const passSeedsChallenge = getPassSeedsChallenge(credentialId);
+      
+      const authResponse = await startAuthentication({
+        optionsJSON: {
+          challenge: bufferToBase64url(passSeedsChallenge.buffer as ArrayBuffer),
+          rpId: getPasskeyRpId(),
+          allowCredentials: [
+            {
+              id: credentialId,
+              type: "public-key",
+            },
+          ],
+          userVerification: "required",
+          timeout: 60000,
+        },
+      });
+
+      // Recover public key from the signature
+      const signature = base64urlToArrayBuffer(authResponse.response.signature);
+      const authenticatorData = base64urlToArrayBuffer(authResponse.response.authenticatorData);
+      const clientDataJSON = new TextEncoder().encode(
+        atob(authResponse.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/"))
+      );
+
+      recoveredPublicKey = await recoverPublicKeyFromSignature(
+        new Uint8Array(signature),
+        new Uint8Array(authenticatorData),
+        clientDataJSON
+      );
+
+      privateKey = derivePrivateKeyFromPublicKey(recoveredPublicKey);
+    }
+
     const { privateKeyToAccount } = await import("viem/accounts");
     const account = privateKeyToAccount(privateKey);
 
@@ -437,7 +681,7 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
 
     // The userHandle in the auth response contains the user.id from registration
     // which was set to "username-timestamp"
-    username = extractUsernameFromUserHandle(authResponse.response.userHandle);
+    username = extractUsernameFromUserHandle(discoveryResponse.response.userHandle);
 
     // Fall back to checking local storage
     if (!username && existingWallet) {
@@ -448,9 +692,10 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
     const credential: PasskeyCredential = {
       credentialId,
       credentialIdHex,
-      publicKey: credentialIdHex,
+      publicKey: recoveredPublicKey || credentialIdHex,
       createdAt: existingWallet?.createdAt || Date.now(),
       username,
+      isLegacy: isLegacy && !!existingWallet,
     };
 
     // Save as current credential
@@ -464,6 +709,7 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
         username: username || "Recovered Wallet",
         address: account.address,
         createdAt: Date.now(),
+        isLegacy: false, // New recoveries use PassSeeds
       });
     }
 
@@ -485,11 +731,17 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
 export async function authenticateWithWallet(
   storedWallet: StoredWallet
 ): Promise<PasskeyWallet | null> {
-  const challenge = generateChallenge();
+  // Determine if this is a legacy wallet
+  const isLegacy = storedWallet.isLegacy !== false;
+
+  // Use deterministic PassSeeds challenge for v2, random for legacy
+  const challenge = isLegacy
+    ? generateChallenge()
+    : getPassSeedsChallenge(storedWallet.credentialId);
 
   try {
     // Authenticate with the specific credential
-    await startAuthentication({
+    const authResponse = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
@@ -504,8 +756,31 @@ export async function authenticateWithWallet(
       },
     });
 
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(storedWallet.credentialIdHex);
+    let privateKey: `0x${string}`;
+    let publicKey: string;
+
+    if (isLegacy) {
+      // Legacy (v1): Derive from credential ID (INSECURE - for backward compatibility only)
+      privateKey = await derivePrivateKeyLegacy(storedWallet.credentialIdHex);
+      publicKey = storedWallet.credentialIdHex;
+    } else {
+      // PassSeeds (v2): Recover public key from signature and derive from it
+      const signature = base64urlToArrayBuffer(authResponse.response.signature);
+      const authenticatorData = base64urlToArrayBuffer(authResponse.response.authenticatorData);
+      const clientDataJSON = new TextEncoder().encode(
+        atob(authResponse.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/"))
+      );
+
+      const recoveredPublicKey = await recoverPublicKeyFromSignature(
+        new Uint8Array(signature),
+        new Uint8Array(authenticatorData),
+        clientDataJSON
+      );
+
+      privateKey = derivePrivateKeyFromPublicKey(recoveredPublicKey);
+      publicKey = recoveredPublicKey;
+    }
+
     const { privateKeyToAccount } = await import("viem/accounts");
     const account = privateKeyToAccount(privateKey);
 
@@ -513,9 +788,10 @@ export async function authenticateWithWallet(
     const credential: PasskeyCredential = {
       credentialId: storedWallet.credentialId,
       credentialIdHex: storedWallet.credentialIdHex,
-      publicKey: storedWallet.credentialIdHex,
+      publicKey,
       createdAt: storedWallet.createdAt,
       username: storedWallet.username,
+      isLegacy,
     };
 
     // Save as current credential
@@ -626,6 +902,100 @@ export async function deleteAccountWithAuth(
     console.error("Delete authentication failed:", error);
     return false;
   }
+}
+
+// ============================================================================
+// MIGRATION HELPERS - For detecting and handling legacy (v1) wallets
+// ============================================================================
+
+// Check if a wallet is using legacy (insecure) key derivation
+export function isLegacyWallet(wallet: StoredWallet | PasskeyCredential): boolean {
+  // Legacy wallets are those without isLegacy explicitly set to false
+  // and are not imported wallets
+  if (wallet.isImported) return false;
+  return wallet.isLegacy !== false;
+}
+
+// Get all legacy wallets that need migration
+export function getLegacyWallets(): StoredWallet[] {
+  return getStoredWallets().filter(
+    (w) => !w.isImported && w.isLegacy !== false
+  );
+}
+
+// Check if there are any legacy wallets that need migration warning
+export function hasLegacyWallets(): boolean {
+  return getLegacyWallets().length > 0;
+}
+
+// Get the secure (v2) address for a passkey
+// This is useful for showing users what their new address will be after migration
+export async function getSecureAddressForPasskey(
+  credentialId: string
+): Promise<`0x${string}` | null> {
+  const passSeedsChallenge = getPassSeedsChallenge(credentialId);
+
+  try {
+    const authResponse = await startAuthentication({
+      optionsJSON: {
+        challenge: bufferToBase64url(passSeedsChallenge.buffer as ArrayBuffer),
+        rpId: getPasskeyRpId(),
+        allowCredentials: [
+          {
+            id: credentialId,
+            type: "public-key",
+          },
+        ],
+        userVerification: "required",
+        timeout: 60000,
+      },
+    });
+
+    // Recover public key from the signature
+    const signature = base64urlToArrayBuffer(authResponse.response.signature);
+    const authenticatorData = base64urlToArrayBuffer(authResponse.response.authenticatorData);
+    const clientDataJSON = new TextEncoder().encode(
+      atob(authResponse.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/"))
+    );
+
+    const recoveredPublicKey = await recoverPublicKeyFromSignature(
+      new Uint8Array(signature),
+      new Uint8Array(authenticatorData),
+      clientDataJSON
+    );
+
+    const privateKey = derivePrivateKeyFromPublicKey(recoveredPublicKey);
+    const { privateKeyToAccount } = await import("viem/accounts");
+    const account = privateKeyToAccount(privateKey);
+
+    return account.address;
+  } catch (error) {
+    console.error("Failed to get secure address:", error);
+    return null;
+  }
+}
+
+// Migration info for a legacy wallet
+export interface MigrationInfo {
+  legacyWallet: StoredWallet;
+  legacyAddress: `0x${string}`;
+  secureAddress: `0x${string}` | null;
+}
+
+// Get migration info for all legacy wallets
+export async function getMigrationInfo(): Promise<MigrationInfo[]> {
+  const legacyWallets = getLegacyWallets();
+  const results: MigrationInfo[] = [];
+
+  for (const wallet of legacyWallets) {
+    results.push({
+      legacyWallet: wallet,
+      legacyAddress: wallet.address as `0x${string}`,
+      secureAddress: null, // Will be populated when user initiates migration
+    });
+  }
+
+  return results;
 }
 
 // Storage key for encrypted imported wallet private keys

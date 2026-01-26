@@ -18,6 +18,8 @@ import {
   isValidPrivateKey,
   updateWalletName,
   isMacCatalystApp,
+  getLegacyWallets,
+  isLegacyWallet,
   type PasskeyWallet,
   type StoredWallet,
 } from "@/lib/passkey";
@@ -208,6 +210,12 @@ export default function WalletApp() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
 
+  // Legacy wallet migration state
+  const [showLegacyWarning, setShowLegacyWarning] = useState(false);
+  const [legacyWalletsList, setLegacyWalletsList] = useState<StoredWallet[]>([]);
+  const [showMigrationModal, setShowMigrationModal] = useState(false);
+  const [migrationSecureAddress, setMigrationSecureAddress] = useState<string | null>(null);
+
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
     async (wallets: StoredWallet[]) => {
@@ -245,6 +253,12 @@ export default function WalletApp() {
     fetchWalletBalances(wallets);
     // Load custom networks
     setNetworkIds(getAllNetworkIds());
+    // Check for legacy wallets that need migration warning
+    const legacyWallets = getLegacyWallets();
+    if (legacyWallets.length > 0) {
+      setLegacyWalletsList(legacyWallets);
+      setShowLegacyWarning(true);
+    }
     // Keep on onboarding view - user needs to unlock with passkey first
     // View switches to "wallet" only after successful unlock
   }, [fetchWalletBalances]);
@@ -1503,8 +1517,18 @@ export default function WalletApp() {
                                   <PunkAvatar address={w.address} size={48} />
                                 )}
                                 <div>
-                                  <div className="font-medium">
+                                  <div className="font-medium flex items-center gap-2">
                                     {w.username}
+                                    {isLegacyWallet(w) && (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-yellow-500/20 text-yellow-500 rounded">
+                                        Legacy
+                                      </span>
+                                    )}
+                                    {w.isImported && (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/20 text-blue-400 rounded">
+                                        Imported
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="font-mono text-xs text-muted">
                                     {w.address.slice(0, 6)}...
@@ -4664,6 +4688,157 @@ export default function WalletApp() {
         <p className="text-xs text-muted">Private keys secured by passkeys</p>
         <Image src="/BGLogo.svg" alt="BG" width={18} height={16} />
       </footer>
+
+      {/* Legacy Wallet Security Warning Modal */}
+      {showLegacyWarning && legacyWalletsList.length > 0 && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+          <div className="bg-card-bg border border-yellow-500/50 rounded-sm p-6 max-w-md w-full space-y-4 animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-yellow-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-yellow-500">Security Warning</h3>
+                <p className="text-sm text-muted">Legacy wallet detected</p>
+              </div>
+            </div>
+            
+            <div className="space-y-3 text-sm">
+              <p className="text-foreground">
+                You have {legacyWalletsList.length} wallet{legacyWalletsList.length > 1 ? 's' : ''} using an older, less secure key derivation method.
+              </p>
+              <p className="text-muted">
+                Legacy wallets derive keys from public data, which means someone with access to your browser storage could potentially access your funds.
+              </p>
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-sm p-3">
+                <p className="text-yellow-500 text-xs font-medium mb-2">Affected wallets:</p>
+                <ul className="space-y-1">
+                  {legacyWalletsList.map((w) => (
+                    <li key={w.credentialId} className="text-xs text-muted flex items-center gap-2">
+                      <span className="font-mono">{formatAddress(w.address)}</span>
+                      <span className="text-muted/60">({w.username})</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <p className="text-muted">
+                <strong className="text-foreground">Recommended:</strong> Create a new secure wallet and transfer your funds to it.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLegacyWarning(false)}
+                className="flex-1 px-4 py-3 bg-card-border/50 text-foreground text-sm rounded-sm hover:bg-card-border transition-colors"
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={() => {
+                  setShowLegacyWarning(false);
+                  setShowMigrationModal(true);
+                }}
+                className="flex-1 px-4 py-3 bg-yellow-500 text-black text-sm font-medium rounded-sm hover:bg-yellow-400 transition-colors"
+              >
+                Create Secure Wallet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Migration Modal - Create new secure wallet */}
+      {showMigrationModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
+          <div className="bg-card-bg border border-card-border rounded-sm p-6 max-w-md w-full space-y-4 animate-fade-in">
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-semibold">Create Secure Wallet</h3>
+              <p className="text-sm text-muted">
+                Create a new wallet with enhanced security. You&apos;ll need to transfer your funds from your legacy wallet to the new one.
+              </p>
+            </div>
+
+            {migrationSecureAddress ? (
+              <div className="space-y-4">
+                <div className="bg-green-500/10 border border-green-500/30 rounded-sm p-4">
+                  <p className="text-green-500 text-sm font-medium mb-2">New Secure Wallet Created!</p>
+                  <p className="text-xs text-muted mb-2">Your new address:</p>
+                  <p className="font-mono text-sm break-all">{migrationSecureAddress}</p>
+                </div>
+                <p className="text-sm text-muted">
+                  Now transfer your funds from your legacy wallet to this new secure address.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowMigrationModal(false);
+                    setMigrationSecureAddress(null);
+                  }}
+                  className="w-full px-4 py-3 bg-accent text-black text-sm font-medium rounded-sm hover:bg-accent/90 transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm text-muted">Wallet Name</label>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="My Secure Wallet"
+                    className="w-full p-3 bg-input-bg border border-input-border rounded-sm text-foreground placeholder:text-muted focus:border-accent focus:outline-none"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowMigrationModal(false);
+                      setUsername("");
+                    }}
+                    className="flex-1 px-4 py-3 bg-card-border/50 text-foreground text-sm rounded-sm hover:bg-card-border transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!username.trim()) {
+                        setError("Please enter a wallet name");
+                        return;
+                      }
+                      setLoading(true);
+                      try {
+                        const result = await registerPasskey(username.trim());
+                        if (result) {
+                          // Get the new wallet address
+                          const wallets = getStoredWallets();
+                          const newWallet = wallets.find(w => w.credentialId === result.credentialId);
+                          if (newWallet) {
+                            setMigrationSecureAddress(newWallet.address);
+                            setStoredWallets(wallets);
+                            // Update legacy wallets list
+                            setLegacyWalletsList(getLegacyWallets());
+                          }
+                        }
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Failed to create wallet");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading || !username.trim()}
+                    className="flex-1 px-4 py-3 bg-accent text-black text-sm font-medium rounded-sm hover:bg-accent/90 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? "Creating..." : "Create Wallet"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* QR Scanner Modal (WalletConnect) */}
       {showQRScanner && (

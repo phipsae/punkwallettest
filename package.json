@@ -22,7 +22,8 @@
     "qrcode.react": "^4.2.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "viem": "^2.41.2"
+    "viem": "^2.41.2",
+    "webauthn-p256": "^0.0.10"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
