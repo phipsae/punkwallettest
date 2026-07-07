@@ -95,6 +95,7 @@ import {
   formatSessionRequest,
   type ClearSigningResult,
 } from "@/lib/clearsigning";
+import { safeImageUrl } from "@/lib/urlsafety";
 import ClearSigningPanel from "./ClearSigningPanel";
 
 // Lock the app after this much inactivity while unlocked
@@ -3888,10 +3889,10 @@ export default function WalletApp() {
                     className="flex items-center justify-between p-4 rounded-sm bg-input-bg border border-card-border"
                   >
                     <div className="flex items-center gap-3">
-                      {session.peerMeta.icons[0] && (
+                      {safeImageUrl(session.peerMeta.icons[0]) && (
                         /* eslint-disable-next-line @next/next/no-img-element */
                         <img
-                          src={session.peerMeta.icons[0]}
+                          src={safeImageUrl(session.peerMeta.icons[0])!}
                           alt=""
                           className="w-10 h-10 rounded-sm"
                           onError={(e) => {
@@ -4696,10 +4697,16 @@ export default function WalletApp() {
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
             <div className="bg-card-bg border border-card-border rounded-sm p-6 max-w-md w-full space-y-6 animate-fade-in">
               <div className="text-center space-y-4">
-                {sessionProposal.params.proposer.metadata.icons[0] && (
+                {safeImageUrl(
+                  sessionProposal.params.proposer.metadata.icons[0]
+                ) && (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
-                    src={sessionProposal.params.proposer.metadata.icons[0]}
+                    src={
+                      safeImageUrl(
+                        sessionProposal.params.proposer.metadata.icons[0]
+                      )!
+                    }
                     alt=""
                     className="w-16 h-16 rounded-sm mx-auto"
                   />

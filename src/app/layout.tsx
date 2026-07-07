@@ -2,6 +2,21 @@ import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+// Content-Security-Policy, delivered two ways: this meta tag (covers the
+// Capacitor build, which serves from capacitor://localhost with no HTTP
+// headers) and vercel.json headers for the web (which additionally set
+// frame-ancestors - not expressible via meta). Keep both in sync.
+//
+// Trade-offs, deliberate:
+// - script-src 'unsafe-inline': the static export emits build-varying inline
+//   bootstrap scripts; per-build hashes would need a post-build injection
+//   step (future hardening). The real win here is no remote script origins
+//   and no unsafe-eval.
+// - connect-src https: wss:: user-added custom RPC URLs are arbitrary, so
+//   origins cannot be enumerated. Still blocks http: exfil and downgrades.
+const CSP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
+
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -55,6 +70,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta httpEquiv="Content-Security-Policy" content={CSP} />
+      </head>
       <body
         className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased`}
       >

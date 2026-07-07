@@ -7,6 +7,7 @@ import {
   erc20Abi,
 } from "viem";
 import { createWalletClientForNetwork, getAllNetworks, getRpcUrl } from "./wallet";
+import { safeImageUrl } from "./urlsafety";
 import type { PrivateKeyAccount } from "viem/accounts";
 
 // Token interface
@@ -165,7 +166,11 @@ export function getCustomTokens(networkId: string): Token[] {
     const stored = localStorage.getItem(CUSTOM_TOKENS_KEY);
     if (!stored) return [];
     const allCustomTokens = JSON.parse(stored) as Record<string, Token[]>;
-    return allCustomTokens[networkId] || [];
+    // Custom-token logos are user/localStorage-supplied - validate on read
+    return (allCustomTokens[networkId] || []).map((t) => ({
+      ...t,
+      logoURI: safeImageUrl(t.logoURI) ?? undefined,
+    }));
   } catch {
     return [];
   }

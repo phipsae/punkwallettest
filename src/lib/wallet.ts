@@ -11,6 +11,7 @@ import {
 } from "viem";
 import { normalize } from "viem/ens";
 import type { PrivateKeyAccount } from "viem/accounts";
+import { safeImageUrl } from "./urlsafety";
 import { mainnet, arbitrum, base, optimism, linea, zkSync, polygon } from "viem/chains";
 
 // Custom network interface for user-added networks
@@ -470,12 +471,13 @@ export async function getENSAvatar(
       return null;
     }
 
-    // Then get the avatar for that name
+    // Then get the avatar for that name. ENS avatar records are
+    // attacker-controlled - only https/data:image URLs pass.
     const avatar = await mainnetClient.getEnsAvatar({
       name: normalize(name),
     });
 
-    return avatar;
+    return safeImageUrl(avatar);
   } catch (error) {
     console.error("ENS avatar resolution failed:", error);
     return null;
@@ -544,7 +546,9 @@ export function getCachedENSAvatar(address: string): string | null {
       return null; // Cache expired, will refetch
     }
 
-    return entry.url;
+    // Re-validate on read: cache entries written before URL validation
+    // existed (or tampered with) must not reach an img src
+    return safeImageUrl(entry.url);
   } catch {
     return null;
   }
