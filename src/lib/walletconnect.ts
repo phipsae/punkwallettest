@@ -428,11 +428,31 @@ export async function executeSessionRequest(
   const { id, topic, params } = request;
   const { method, params: requestParams } = params.request;
 
+  const isAddressShaped = (value: unknown): value is string =>
+    typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
+
+  // The request's signer/from address must be the unlocked account. With
+  // multiple wallets, a session approved as account A can receive a request
+  // while account B is unlocked - signing with the wrong key must fail, and
+  // the throw lands inside the try below so the dApp gets the error response.
+  const assertRequestedSigner = (requested: string | undefined): void => {
+    if (!requested) return;
+    if (requested.toLowerCase() !== account.address.toLowerCase()) {
+      throw new Error(
+        `Request is for address ${requested} but the unlocked wallet is ${account.address}. Switch to the requested account and try again.`
+      );
+    }
+  };
+
   try {
     let result: string;
 
     switch (method) {
       case "personal_sign": {
+        // Standard shape is [message, address]; tolerate swapped params
+        assertRequestedSigner(
+          [requestParams[1], requestParams[0]].find(isAddressShaped)
+        );
         const message = requestParams[0] as Hex;
         result = await account.signMessage({
           message: { raw: message },
@@ -442,6 +462,10 @@ export async function executeSessionRequest(
 
       case "eth_signTypedData":
       case "eth_signTypedData_v4": {
+        // Standard shape is [address, typedDataJson]
+        assertRequestedSigner(
+          isAddressShaped(requestParams[0]) ? requestParams[0] : undefined
+        );
         const typedData = JSON.parse(requestParams[1] as string);
         result = await account.signTypedData(typedData);
         break;
@@ -456,6 +480,8 @@ export async function executeSessionRequest(
           gas?: string;
           gasPrice?: string;
         };
+        // An absent from means the wallet's own account
+        assertRequestedSigner(tx.from);
 
         // Get chain info dynamically. No fallback: signing against a
         // silently substituted chain is worse than failing.
