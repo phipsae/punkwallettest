@@ -934,27 +934,35 @@ export async function deleteAccountWithAuth(
         timeout: 60000,
       },
     });
-
-    // Authentication successful - remove from wallets list
-    removeWalletFromList(storedWallet.credentialId);
-
-    // If this was the current credential, clear it
-    const currentCredential = getStoredCredential();
-    if (currentCredential?.credentialId === storedWallet.credentialId) {
-      clearStoredCredential();
-    }
-
-    // If imported wallet, also remove the encrypted key
-    if (storedWallet.isImported) {
-      await removeEncryptedKey(storedWallet.credentialId);
-    }
-
-    return true;
   } catch (error) {
+    // Only ceremony failures/cancels map to false; everything after a
+    // successful auth throws with its real message.
     if (error instanceof RpIdConfigurationError) throw error;
     console.error("Delete authentication failed:", error);
     return false;
   }
+
+  // For imported wallets, delete the encrypted key blob FIRST. If the
+  // Keychain delete fails this throws, keeping the wallet metadata intact
+  // so the user can retry - never orphan a Keychain secret that no metadata
+  // points at.
+  const imported = await isImportedCredential(
+    storedWallet.credentialId,
+    storedWallet.isImported
+  );
+  if (imported) {
+    await removeEncryptedKey(storedWallet.credentialId);
+  }
+
+  // Blob gone (or derived wallet) - now remove the metadata
+  removeWalletFromList(storedWallet.credentialId);
+
+  const currentCredential = getStoredCredential();
+  if (currentCredential?.credentialId === storedWallet.credentialId) {
+    clearStoredCredential();
+  }
+
+  return true;
 }
 
 // Derive an AES-GCM encryption key from the PRF secret (domain-separated from
