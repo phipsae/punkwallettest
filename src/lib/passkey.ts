@@ -6,6 +6,12 @@ import { bytesToHex } from "viem";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { formatAddress } from "./wallet";
+import {
+  getEncryptedKeyRecord,
+  hasEncryptedKey,
+  saveEncryptedKey,
+  removeEncryptedKey,
+} from "./keystore";
 
 // WebAuthn PRF extension types. The @simplewebauthn/browser v13 DOM types do
 // not declare `prf`, so we describe the shape we pass in and read back.
@@ -444,7 +450,7 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
   const storedWallet = getStoredWallets().find(
     (w) => w.credentialId === credential.credentialId
   );
-  const imported = isImportedCredential(
+  const imported = await isImportedCredential(
     credential.credentialId,
     credential.isImported
   );
@@ -559,13 +565,13 @@ export async function recoverWallet(): Promise<RecoveryResult | null> {
   const handleIsImport = !!importHandleMatch;
   const importAddress = importHandleMatch?.[1];
   const imported =
-    isImportedCredential(credentialId, existingWallet?.isImported) ||
+    (await isImportedCredential(credentialId, existingWallet?.isImported)) ||
     handleIsImport;
 
   // An imported wallet's key only exists as an encrypted blob on the device
   // that imported it. Never fall through to derivation - that would open a
   // different, empty address.
-  if (imported && !(credentialId in getEncryptedKeys())) {
+  if (imported && !(await hasEncryptedKey(credentialId))) {
     const shortAddress = importAddress ? ` (${formatAddress(importAddress)})` : "";
     throw new Error(
       `This passkey belongs to an imported wallet${shortAddress}. Its key cannot be recovered from the passkey alone. Re-import the private key on this device.`
@@ -637,7 +643,12 @@ export async function authenticateWithWallet(
 ): Promise<PasskeyWallet | null> {
   // Imported wallets must go through decryption, never key derivation.
   // Delegation replaces this function's own ceremony, so still one prompt.
-  if (isImportedCredential(storedWallet.credentialId, storedWallet.isImported)) {
+  if (
+    await isImportedCredential(
+      storedWallet.credentialId,
+      storedWallet.isImported
+    )
+  ) {
     return unlockImportedWallet({ ...storedWallet, isImported: true });
   }
 
@@ -780,7 +791,7 @@ export async function deleteAccountWithAuth(
 
     // If imported wallet, also remove the encrypted key
     if (storedWallet.isImported) {
-      removeEncryptedKey(storedWallet.credentialId);
+      await removeEncryptedKey(storedWallet.credentialId);
     }
 
     return true;
@@ -788,42 +799,6 @@ export async function deleteAccountWithAuth(
     console.error("Delete authentication failed:", error);
     return false;
   }
-}
-
-// Storage key for encrypted imported wallet private keys
-const ENCRYPTED_KEYS_STORAGE_KEY = "punk_wallet_encrypted_keys";
-
-// Get stored encrypted private keys
-function getEncryptedKeys(): Record<
-  string,
-  { iv: string; ciphertext: string }
-> {
-  if (typeof window === "undefined") return {};
-  const stored = localStorage.getItem(ENCRYPTED_KEYS_STORAGE_KEY);
-  if (!stored) return {};
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return {};
-  }
-}
-
-// Save encrypted private key
-function saveEncryptedKey(
-  credentialId: string,
-  iv: string,
-  ciphertext: string
-): void {
-  const keys = getEncryptedKeys();
-  keys[credentialId] = { iv, ciphertext };
-  localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
-}
-
-// Remove encrypted private key
-function removeEncryptedKey(credentialId: string): void {
-  const keys = getEncryptedKeys();
-  delete keys[credentialId];
-  localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
 }
 
 // Derive an AES-GCM encryption key from the PRF secret (domain-separated from
@@ -903,7 +878,7 @@ async function decryptImportedPrivateKey(
   credentialId: string,
   prfSecret: Uint8Array
 ): Promise<`0x${string}`> {
-  const encryptedData = getEncryptedKeys()[credentialId];
+  const encryptedData = await getEncryptedKeyRecord(credentialId);
   if (!encryptedData) {
     throw new Error(
       "This wallet was imported from a private key, but its encrypted key is not on this device. Re-import the private key to restore it."
@@ -953,13 +928,16 @@ async function resolveKeyForCredential(
 // Single source of truth for "is this credential an imported wallet?".
 // The encrypted-keys check covers credential blobs saved before the
 // isImported flag was written consistently everywhere.
-function isImportedCredential(credentialId: string, hint?: boolean): boolean {
+async function isImportedCredential(
+  credentialId: string,
+  hint?: boolean
+): Promise<boolean> {
   if (hint === true) return true;
   const stored = getStoredWallets().find(
     (w) => w.credentialId === credentialId
   );
   if (stored?.isImported) return true;
-  return credentialId in getEncryptedKeys();
+  return hasEncryptedKey(credentialId);
 }
 
 // Validate private key format
@@ -1041,7 +1019,7 @@ export async function importWalletFromPrivateKey(
     );
 
     // Step 4: Store the encrypted key
-    saveEncryptedKey(credentialId, iv, ciphertext);
+    await saveEncryptedKey(credentialId, { iv, ciphertext });
 
     // Create credential object
     const credential: PasskeyCredential = {
@@ -1146,7 +1124,9 @@ export async function unlockImportedWallet(
 }
 
 // Enhanced remove that also cleans up encrypted keys
-export function removeWalletFromListWithCleanup(credentialId: string): void {
+export async function removeWalletFromListWithCleanup(
+  credentialId: string
+): Promise<void> {
   removeWalletFromList(credentialId);
-  removeEncryptedKey(credentialId);
+  await removeEncryptedKey(credentialId);
 }

@@ -534,13 +534,24 @@ export function formatRequestDisplay(request: SessionRequest): {
     case "eth_sendTransaction": {
       const tx = params[0] as { to: string; value?: string; data?: string };
       const value = tx.value ? formatEther(BigInt(tx.value)) : "0";
+      const shortTo = `${tx.to.slice(0, 8)}...${tx.to.slice(-6)}`;
+      const isContractCall = !!tx.data && tx.data !== "0x";
+      // A contract call with zero value is not an "ETH send" - only frame it
+      // that way for an actual native-value transfer.
+      let description: string;
+      if (isContractCall) {
+        description =
+          value !== "0"
+            ? `Contract interaction with ${shortTo} (sending ${value} ETH)`
+            : `Contract interaction with ${shortTo}`;
+      } else {
+        description = `Send ${value} ETH to ${shortTo}`;
+      }
       return {
         method: "Send Transaction",
-        description: `Send ${value} ETH to ${tx.to.slice(0, 8)}...${tx.to.slice(
-          -6
-        )}`,
-        details: tx.data
-          ? `Contract interaction with data: ${tx.data.slice(0, 66)}...`
+        description,
+        details: isContractCall
+          ? `Contract interaction with data: ${tx.data!.slice(0, 66)}...`
           : "Simple ETH transfer",
       };
     }

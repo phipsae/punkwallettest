@@ -1116,13 +1116,16 @@ export default function WalletApp() {
         setSuccess("Request approved!");
         setTimeout(() => setSuccess(null), 3000);
       }
-      setSessionRequest(null);
       fetchBalance(); // Refresh balance after transaction
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to process request"
       );
     } finally {
+      // Always dismiss the modal, even if responding to the dApp failed
+      // (e.g. the WalletConnect session was already deleted). Otherwise the
+      // user gets stuck on a request they can neither approve nor reject.
+      setSessionRequest(null);
       setLoading(false);
     }
   };
