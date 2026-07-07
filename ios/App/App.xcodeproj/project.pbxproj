@@ -19,6 +19,7 @@
 		CA5E000000000000000000B1 /* ClearSigningPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A1 /* ClearSigningPlugin.swift */; };
 		CA5E000000000000000000B2 /* StaticDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A2 /* StaticDataProvider.swift */; };
 		CA5E000000000000000000B3 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A3 /* MainViewController.swift */; };
+		CA5E000000000000000000B4 /* SecureStoragePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A4 /* SecureStoragePlugin.swift */; };
 		CA5E000000000000000000C3 /* ClearSigning in Frameworks */ = {isa = PBXBuildFile; productRef = CA5E000000000000000000C2 /* ClearSigning */; };
 /* End PBXBuildFile section */
 
@@ -38,6 +39,7 @@
 		CA5E000000000000000000A1 /* ClearSigningPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearSigningPlugin.swift; sourceTree = "<group>"; };
 		CA5E000000000000000000A2 /* StaticDataProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaticDataProvider.swift; sourceTree = "<group>"; };
 		CA5E000000000000000000A3 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
+		CA5E000000000000000000A4 /* SecureStoragePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureStoragePlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +79,7 @@
 				CA5E000000000000000000A1 /* ClearSigningPlugin.swift */,
 				CA5E000000000000000000A2 /* StaticDataProvider.swift */,
 				CA5E000000000000000000A3 /* MainViewController.swift */,
+				CA5E000000000000000000A4 /* SecureStoragePlugin.swift */,
 				D4FD04D42EE7B3980087DAE9 /* App.entitlements */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -178,6 +181,7 @@
 				CA5E000000000000000000B1 /* ClearSigningPlugin.swift in Sources */,
 				CA5E000000000000000000B2 /* StaticDataProvider.swift in Sources */,
 				CA5E000000000000000000B3 /* MainViewController.swift in Sources */,
+				CA5E000000000000000000B4 /* SecureStoragePlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
