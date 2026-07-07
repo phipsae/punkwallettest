@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated/native iOS artifacts (cap sync copies the web build into
+    // ios/App/App/public, SPM builds under ios/App/CapApp-SPM/.build)
+    "ios/**",
+    // Node build utilities, CommonJS by design
+    "scripts/**",
   ]),
   // Key material must stay behind the signer boundary: only signer.ts may
   // import the escape hatch that exposes the private key.
