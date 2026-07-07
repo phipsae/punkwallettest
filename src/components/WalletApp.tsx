@@ -97,6 +97,9 @@ import {
 } from "@/lib/clearsigning";
 import ClearSigningPanel from "./ClearSigningPanel";
 
+// Lock the app after this much inactivity while unlocked
+const AUTO_LOCK_MS = 5 * 60 * 1000;
+
 type View =
   | "onboarding"
   | "wallet"
@@ -223,6 +226,97 @@ export default function WalletApp() {
   // Rename wallet state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
+
+  // Wipe every piece of transient secret state: the revealed export key and
+  // the import form's plaintext key. Called on backgrounding, tab hide, and
+  // as part of locking.
+  const wipeTransientSecrets = useCallback(() => {
+    if (revealTimeoutRef.current) {
+      clearTimeout(revealTimeoutRef.current);
+      revealTimeoutRef.current = null;
+    }
+    setRevealedKey(null);
+    setShowPrivateKey(false);
+    setExportConfirmed(false);
+    setImportPrivateKey("");
+    setShowImportKey(false);
+  }, []);
+
+  // Full lock: wipe secrets, dismiss pending WalletConnect prompts
+  // (best-effort reject so the dApp is not left hanging), drop the wallet
+  // from state, and return to the unlock screen. The stored credential is
+  // kept so re-unlocking is one passkey prompt.
+  const lockWallet = useCallback(() => {
+    wipeTransientSecrets();
+    if (sessionRequest) {
+      rejectSessionRequest(sessionRequest).catch(() => {});
+      setSessionRequest(null);
+    }
+    if (sessionProposal) {
+      rejectSession(sessionProposal.id).catch(() => {});
+      setSessionProposal(null);
+    }
+    setWallet(null);
+    setBalance("0");
+    setView("onboarding");
+  }, [wipeTransientSecrets, sessionRequest, sessionProposal]);
+
+  // Wipe transient secrets whenever the app leaves the foreground: browser
+  // tab hidden (web) and appStateChange (native, fires when the iOS app is
+  // backgrounded). Pending WalletConnect modals survive backgrounding on
+  // purpose - approving a desktop dApp request from the phone requires it.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        wipeTransientSecrets();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    let removeAppListener: (() => void) | undefined;
+    if (Capacitor.isNativePlatform()) {
+      import("@capacitor/app").then(({ App }) => {
+        App.addListener("appStateChange", ({ isActive }) => {
+          if (!isActive) wipeTransientSecrets();
+        }).then((handle) => {
+          removeAppListener = () => handle.remove();
+        });
+      });
+    }
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      removeAppListener?.();
+    };
+  }, [wipeTransientSecrets]);
+
+  // Auto-lock after inactivity. State holds no key material, but a stale
+  // unlocked session should not stay open on an unattended device.
+  const lastActivityRef = useRef(Date.now());
+  useEffect(() => {
+    if (!wallet) return;
+
+    const bumpActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+    bumpActivity();
+    window.addEventListener("pointerdown", bumpActivity);
+    window.addEventListener("keydown", bumpActivity);
+    window.addEventListener("touchstart", bumpActivity);
+
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > AUTO_LOCK_MS) {
+        lockWallet();
+      }
+    }, 30000);
+
+    return () => {
+      window.removeEventListener("pointerdown", bumpActivity);
+      window.removeEventListener("keydown", bumpActivity);
+      window.removeEventListener("touchstart", bumpActivity);
+      clearInterval(interval);
+    };
+  }, [wallet, lockWallet]);
 
   // Fetch balances for all stored wallets
   const fetchWalletBalances = useCallback(
