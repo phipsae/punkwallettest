@@ -4629,6 +4629,47 @@ export default function WalletApp() {
                 </p>
               </div>
 
+              {/* Requested chains - the user must see what they grant */}
+              {(() => {
+                const requestedChains = Array.from(
+                  new Set([
+                    ...(sessionProposal.params.requiredNamespaces?.eip155
+                      ?.chains ?? []),
+                    ...(sessionProposal.params.optionalNamespaces?.eip155
+                      ?.chains ?? []),
+                  ])
+                );
+                if (requestedChains.length === 0) return null;
+                const networks = getAllNetworks();
+                return (
+                  <div className="p-4 rounded-sm bg-input-bg border border-card-border">
+                    <p className="text-xs text-muted uppercase tracking-wider mb-2">
+                      Requested networks
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {requestedChains.map((chainKey) => {
+                        const chainId = chainKey.split(":")[1];
+                        const known = Object.values(networks).find(
+                          (n) => String(n.id) === chainId
+                        );
+                        return (
+                          <span
+                            key={chainKey}
+                            className={`text-xs px-2 py-1 rounded-sm border ${
+                              known
+                                ? "border-card-border text-foreground/70"
+                                : "border-warning/40 text-warning"
+                            }`}
+                          >
+                            {known ? known.name : `${chainKey} (unsupported)`}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={handleRejectSession}
@@ -4684,6 +4725,40 @@ export default function WalletApp() {
                       loading={clearSigningLoading}
                       result={clearSigningResult}
                     />
+
+                    {/* Request context: chain, origin, recipient, value */}
+                    <div className="p-4 rounded-sm bg-input-bg border border-card-border space-y-1.5">
+                      <div className="flex justify-between gap-3 text-xs">
+                        <span className="text-muted">Network</span>
+                        <span className="text-foreground/80 text-right">
+                          {display.chainName}
+                        </span>
+                      </div>
+                      {display.origin && (
+                        <div className="flex justify-between gap-3 text-xs">
+                          <span className="text-muted">Origin</span>
+                          <span className="text-foreground/80 text-right break-all">
+                            {display.origin}
+                          </span>
+                        </div>
+                      )}
+                      {display.to && (
+                        <div className="flex justify-between gap-3 text-xs">
+                          <span className="text-muted">To</span>
+                          <span className="text-foreground/80 text-right font-mono break-all">
+                            {display.to}
+                          </span>
+                        </div>
+                      )}
+                      {display.value && (
+                        <div className="flex justify-between gap-3 text-xs">
+                          <span className="text-muted">Value</span>
+                          <span className="text-foreground/80 text-right">
+                            {display.value}
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
                     <div className="p-4 rounded-sm bg-input-bg border border-card-border max-h-40 overflow-auto">
                       <pre className="text-xs font-mono text-muted whitespace-pre-wrap break-all">

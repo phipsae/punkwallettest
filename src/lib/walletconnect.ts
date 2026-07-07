@@ -33,9 +33,10 @@ function getChainIdToNetworkMap(): Record<string, string> {
   return mapping;
 }
 
+// eth_sign is deliberately absent: it blind-signs arbitrary hashes and is
+// rejected outright (UNSUPPORTED_METHODS), never shown to the user.
 const SUPPORTED_METHODS = [
   "eth_sendTransaction",
-  "eth_sign",
   "personal_sign",
   "eth_signTypedData",
   "eth_signTypedData_v4",
@@ -180,8 +181,40 @@ export async function initWalletConnect(): Promise<InstanceType<
 
     walletKit.on("session_request", async (request) => {
       console.log("Session request received:", request);
+      const sessionRequest = request as SessionRequest;
+
+      // Auto-reject before any UI: unsupported methods (incl. eth_sign,
+      // possibly advertised by sessions approved before it was dropped) and
+      // chains this wallet does not know. Never sign against a silently
+      // substituted chain.
+      const method = sessionRequest.params.request.method;
+      const requestChainId = sessionRequest.params.chainId.split(":")[1];
+      const knownChain = requestChainId in getChainIdToNetworkMap();
+      if (!SUPPORTED_METHODS.includes(method) || !knownChain) {
+        const reason = !SUPPORTED_METHODS.includes(method)
+          ? getSdkError("UNSUPPORTED_METHODS")
+          : getSdkError("UNSUPPORTED_CHAINS");
+        console.warn(
+          `Auto-rejecting session request (${method} on ${sessionRequest.params.chainId}):`,
+          reason.message
+        );
+        try {
+          await walletKit?.respondSessionRequest({
+            topic: sessionRequest.topic,
+            response: {
+              id: sessionRequest.id,
+              jsonrpc: "2.0",
+              error: reason,
+            },
+          });
+        } catch (err) {
+          console.error("Failed to auto-reject session request:", err);
+        }
+        return;
+      }
+
       if (eventCallbacks.onSessionRequest) {
-        eventCallbacks.onSessionRequest(request as SessionRequest);
+        eventCallbacks.onSessionRequest(sessionRequest);
       }
     });
 
@@ -407,14 +440,6 @@ export async function executeSessionRequest(
         break;
       }
 
-      case "eth_sign": {
-        const message = requestParams[1] as Hex;
-        result = await account.signMessage({
-          message: { raw: message },
-        });
-        break;
-      }
-
       case "eth_signTypedData":
       case "eth_signTypedData_v4": {
         const typedData = JSON.parse(requestParams[1] as string);
@@ -432,15 +457,15 @@ export async function executeSessionRequest(
           gasPrice?: string;
         };
 
-        // Get chain info dynamically
+        // Get chain info dynamically. No fallback: signing against a
+        // silently substituted chain is worse than failing.
         const { createWalletClientForNetwork } = await import("./wallet");
         const chainId = params.chainId.split(":")[1];
-        const chainIdToNetworkId = getChainIdToNetworkMap();
-        const supportedChains = getSupportedChains();
-
-        // Find the network ID and chain for this chainId
-        const networkId = chainIdToNetworkId[chainId] || "base";
-        const chain = supportedChains[`eip155:${chainId}`] || supportedChains["eip155:8453"];
+        const networkId = getChainIdToNetworkMap()[chainId];
+        const chain = getSupportedChains()[`eip155:${chainId}`];
+        if (!networkId || !chain) {
+          throw new Error(`Unsupported chain eip155:${chainId}`);
+        }
 
         const walletClient = createWalletClientForNetwork(account, networkId);
 
@@ -494,17 +519,37 @@ export async function executeSessionRequest(
   }
 }
 
-// Format request for display
-export function formatRequestDisplay(request: SessionRequest): {
+export interface RequestDisplay {
   method: string;
   description: string;
   details: string;
-} {
+  // Context the user must see before approving: which chain, which origin,
+  // and (for transactions) recipient and value.
+  chainId: string;
+  chainName: string;
+  origin?: string;
+  to?: string;
+  value?: string;
+}
+
+// Format request for display
+export function formatRequestDisplay(request: SessionRequest): RequestDisplay {
   const { method, params } = request.params.request;
 
+  // Resolve the target chain name; never substitute a different chain
+  const rawChainId = request.params.chainId.split(":")[1];
+  const networkId = getChainIdToNetworkMap()[rawChainId];
+  const chainName = networkId
+    ? getAllNetworks()[networkId]?.name ?? networkId
+    : `Unknown chain (eip155:${rawChainId})`;
+  const context = {
+    chainId: request.params.chainId,
+    chainName,
+    origin: request.verifyContext?.verified?.origin || undefined,
+  };
+
   switch (method) {
-    case "personal_sign":
-    case "eth_sign": {
+    case "personal_sign": {
       const message = params[0] as string;
       let decodedMessage = message;
       try {
@@ -518,6 +563,7 @@ export function formatRequestDisplay(request: SessionRequest): {
         // Keep original if decoding fails
       }
       return {
+        ...context,
         method: "Sign Message",
         description: "The dApp is requesting you to sign a message",
         details:
@@ -531,6 +577,7 @@ export function formatRequestDisplay(request: SessionRequest): {
     case "eth_signTypedData_v4": {
       const typedData = JSON.parse(params[1] as string);
       return {
+        ...context,
         method: "Sign Typed Data",
         description: "The dApp is requesting you to sign structured data",
         details: JSON.stringify(typedData.message || typedData, null, 2).slice(
@@ -557,16 +604,20 @@ export function formatRequestDisplay(request: SessionRequest): {
         description = `Send ${value} ETH to ${shortTo}`;
       }
       return {
+        ...context,
         method: "Send Transaction",
         description,
         details: isContractCall
           ? `Contract interaction with data: ${tx.data!.slice(0, 66)}...`
           : "Simple ETH transfer",
+        to: tx.to,
+        value: `${value} ETH`,
       };
     }
 
     default:
       return {
+        ...context,
         method,
         description: "Unknown request type",
         details: JSON.stringify(params).slice(0, 200),
