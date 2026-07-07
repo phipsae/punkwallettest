@@ -87,6 +87,11 @@ import {
   getNativeTokenPrice,
   getNativeTokenSymbol,
 } from "@/lib/price";
+import {
+  formatSessionRequest,
+  type ClearSigningResult,
+} from "@/lib/clearsigning";
+import ClearSigningPanel from "./ClearSigningPanel";
 
 type View =
   | "onboarding"
@@ -167,6 +172,9 @@ export default function WalletApp() {
   );
   const [wcInitialized, setWcInitialized] = useState(false);
   const [wcUnavailable, setWcUnavailable] = useState(false);
+  const [clearSigningResult, setClearSigningResult] =
+    useState<ClearSigningResult | null>(null);
+  const [clearSigningLoading, setClearSigningLoading] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showPaymentScanner, setShowPaymentScanner] = useState(false);
   const previousWalletAddress = useRef<string | null>(null);
@@ -292,6 +300,29 @@ export default function WalletApp() {
 
     init();
   }, [wallet, wcInitialized, wcUnavailable]);
+
+  // Decode incoming WalletConnect requests via the native clear-signing
+  // engine (ERC-7730) for the approval modal
+  useEffect(() => {
+    setClearSigningResult(null);
+    if (!sessionRequest) {
+      setClearSigningLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setClearSigningLoading(true);
+    formatSessionRequest(sessionRequest).then((result) => {
+      if (cancelled) return;
+      setClearSigningResult(result);
+      setClearSigningLoading(false);
+    });
+
+    // Stale guard: the modal may have moved on to another request
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionRequest]);
 
   // Update WalletConnect sessions when wallet address changes
   useEffect(() => {
@@ -885,9 +916,11 @@ export default function WalletApp() {
         setHasCredential(true);
         setView("wallet");
       }
-      // If walletData is null, user likely cancelled - do nothing
-    } catch {
-      // User cancelled or error occurred - silently ignore
+      // If walletData is null, user cancelled - do nothing
+    } catch (err) {
+      // Cancels return null, so anything thrown is a real failure
+      // (missing encrypted key, integrity mismatch)
+      setError(err instanceof Error ? err.message : "Failed to unlock wallet");
     } finally {
       setLoading(false);
       setSelectedWalletIndex(null);
@@ -1162,7 +1195,9 @@ export default function WalletApp() {
       }
     } catch (err) {
       console.error("Passkey authentication failed:", err);
-      setError("Authentication cancelled or failed.");
+      setError(
+        err instanceof Error ? err.message : "Authentication cancelled or failed."
+      );
     } finally {
       setIsAuthenticatingForExport(false);
     }
@@ -2030,7 +2065,7 @@ export default function WalletApp() {
               d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span className="truncate">{error}</span>
+          <span className="line-clamp-3 break-words">{error}</span>
           <button
             onClick={() => setError(null)}
             className="ml-1 p-1 hover:bg-white/20 rounded-full shrink-0"
@@ -4416,9 +4451,15 @@ export default function WalletApp() {
                                       setSuccess(`Switched to ${w.username}`);
                                       setTimeout(() => setSuccess(null), 2000);
                                     }
-                                    // If walletData is null, user likely cancelled - do nothing
-                                  } catch {
-                                    // User cancelled or error occurred - silently ignore
+                                    // If walletData is null, user cancelled - do nothing
+                                  } catch (err) {
+                                    // Cancels return null, so anything thrown
+                                    // is a real failure
+                                    setError(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "Failed to unlock wallet"
+                                    );
                                   } finally {
                                     setSwitchingWalletIndex(null);
                                   }
@@ -4624,6 +4665,11 @@ export default function WalletApp() {
                         {display.description}
                       </p>
                     </div>
+
+                    <ClearSigningPanel
+                      loading={clearSigningLoading}
+                      result={clearSigningResult}
+                    />
 
                     <div className="p-4 rounded-sm bg-input-bg border border-card-border max-h-40 overflow-auto">
                       <pre className="text-xs font-mono text-muted whitespace-pre-wrap break-all">

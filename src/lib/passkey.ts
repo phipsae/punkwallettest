@@ -2,7 +2,24 @@ import {
   startRegistration,
   startAuthentication,
 } from "@simplewebauthn/browser";
-import { hexToBytes, keccak256, concat } from "viem";
+import { bytesToHex } from "viem";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { formatAddress } from "./wallet";
+
+// WebAuthn PRF extension types. The @simplewebauthn/browser v13 DOM types do
+// not declare `prf`, so we describe the shape we pass in and read back.
+// simplewebauthn forwards `extensions` verbatim to the native call, so the
+// eval salt must be raw bytes and the result comes back as an ArrayBuffer.
+interface PrfExtensionOutput {
+  prf?: { enabled?: boolean; results?: { first?: ArrayBuffer } };
+}
+
+// The bundled extension-input type lacks `prf`; simplewebauthn forwards the
+// object verbatim to the native call, so we build it untyped and cast.
+type WebAuthnExtensions = Parameters<
+  typeof startAuthentication
+>[0]["optionsJSON"]["extensions"];
 
 // Types for our passkey-derived wallet
 export interface PasskeyCredential {
@@ -92,22 +109,89 @@ function generateChallenge(): Uint8Array {
   return challenge;
 }
 
-// Derive a private key from the passkey credential ID
-// We use ONLY the credential ID for deterministic derivation
-// This ensures the same passkey always produces the same wallet
-async function derivePrivateKey(
-  credentialIdHex: string
-): Promise<`0x${string}`> {
-  const credentialBytes = hexToBytes(credentialIdHex as `0x${string}`);
+// Fixed application salt for the WebAuthn PRF evaluation. Must never change:
+// rotating it would change the PRF output and thus every wallet address.
+const PRF_SALT = new TextEncoder().encode(
+  "PunkWallet-PRF-v2-eval-salt-do-not-change"
+);
 
-  // Add a domain separator for security
-  const domainSeparator = new TextEncoder().encode("PunkWallet-v1");
+// HKDF info strings domain-separate the two secrets derived from the same
+// PRF output (the wallet key and the imported-key encryption key).
+const EOA_HKDF_INFO = new TextEncoder().encode("PunkWallet-EOA-v2");
+const ENC_HKDF_INFO = new TextEncoder().encode("PunkWallet-Import-Encryption-v2");
 
-  // Hash credential ID with domain separator to get private key
-  const combined = concat([domainSeparator, credentialBytes]);
-  const privateKey = keccak256(combined);
+// Extension object passed to every registration/authentication ceremony
+function prfExtensionInput(): WebAuthnExtensions {
+  return { prf: { eval: { first: PRF_SALT } } } as unknown as WebAuthnExtensions;
+}
 
-  return privateKey;
+// Pull the 32-byte PRF secret out of a ceremony's client extension results.
+// Returns null when the authenticator/browser did not return PRF output.
+function readPrfSecret(clientExtensionResults: unknown): Uint8Array | null {
+  const first = (clientExtensionResults as PrfExtensionOutput)?.prf?.results
+    ?.first;
+  if (!first) return null;
+  return new Uint8Array(first);
+}
+
+// Loud, specific error when PRF is unavailable. Callers must never fall back
+// to any credential-ID-based derivation - that is the insecure scheme we
+// removed.
+class PrfUnsupportedError extends Error {
+  constructor() {
+    super(
+      "This device or browser does not support the passkey PRF extension, which Punk Wallet needs to secure your key. Use a device with iOS 18+/Safari 18+ and iCloud Keychain, or a recent Chrome."
+    );
+    this.name = "PrfUnsupportedError";
+  }
+}
+
+// Derive the EOA private key from the PRF secret via HKDF-SHA256.
+// The PRF secret is Input Keying Material, not used directly as the key.
+function derivePrivateKeyFromPrf(prfSecret: Uint8Array): `0x${string}` {
+  const key = hkdf(sha256, prfSecret, undefined, EOA_HKDF_INFO, 32);
+  return bytesToHex(key);
+}
+
+// Read the PRF secret from a ceremony result or throw the unsupported error
+function requirePrfSecret(clientExtensionResults: unknown): Uint8Array {
+  const secret = readPrfSecret(clientExtensionResults);
+  if (!secret) throw new PrfUnsupportedError();
+  return secret;
+}
+
+// Run an authentication ceremony for a specific credential purely to obtain
+// its PRF secret. Used when create() did not return PRF output (some
+// authenticators only expose PRF on get()). Costs one extra biometric prompt.
+async function evaluatePrfForCredential(
+  credentialId: string
+): Promise<Uint8Array> {
+  const challenge = generateChallenge();
+  const result = await startAuthentication({
+    optionsJSON: {
+      challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
+      rpId: getPasskeyRpId(),
+      allowCredentials: [{ id: credentialId, type: "public-key" }],
+      userVerification: "required",
+      timeout: 60000,
+      extensions: prfExtensionInput(),
+    },
+  });
+  return requirePrfSecret(result.clientExtensionResults);
+}
+
+// Whether the current environment can do a WebAuthn ceremony at all. PRF
+// support itself can only be confirmed by running a ceremony, so onboarding
+// checks this and surfaces PrfUnsupportedError if the result lacks PRF.
+export async function isWebAuthnAvailable(): Promise<boolean> {
+  if (typeof window === "undefined" || !window.PublicKeyCredential) {
+    return false;
+  }
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
 }
 
 // Convert ArrayBuffer to base64url string
@@ -278,6 +362,7 @@ export async function registerPasskey(
       },
       timeout: 60000,
       attestation: "none",
+      extensions: prfExtensionInput(),
     },
   });
 
@@ -292,8 +377,12 @@ export async function registerPasskey(
     username,
   };
 
-  // Derive the address for this credential
-  const privateKey = await derivePrivateKey(credential.credentialIdHex);
+  // Derive the address from the PRF secret. Some authenticators do not return
+  // PRF output on create(), so fall back to an immediate get() ceremony.
+  const prfSecret =
+    readPrfSecret(registrationResponse.clientExtensionResults) ??
+    (await evaluatePrfForCredential(credential.credentialId));
+  const privateKey = derivePrivateKeyFromPrf(prfSecret);
   const { privateKeyToAccount } = await import("viem/accounts");
   const account = privateKeyToAccount(privateKey);
 
@@ -322,48 +411,65 @@ export async function authenticateAndDeriveWallet(): Promise<PasskeyWallet | nul
   const credential: PasskeyCredential = JSON.parse(stored);
   const challenge = generateChallenge();
 
-  // Handle migration from old format (where credentialId was hex)
-  let credentialIdBase64url = credential.credentialId;
-  let credentialIdHex = credential.credentialIdHex;
-
-  // If credentialId starts with 0x, it's in the old format
-  if (credential.credentialId.startsWith("0x")) {
-    const hexBytes = hexToBytes(credential.credentialId as `0x${string}`);
-    credentialIdBase64url = bufferToBase64url(hexBytes.buffer as ArrayBuffer);
-    credentialIdHex = credential.credentialId;
-  }
-
+  let prfSecret: Uint8Array;
   try {
-    // Authenticate with specific credential
-    await startAuthentication({
+    // Authenticate with the specific credential, requesting the PRF secret
+    const result = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
         allowCredentials: [
           {
-            id: credentialIdBase64url,
+            id: credential.credentialId,
             type: "public-key",
           },
         ],
         userVerification: "required",
         timeout: 60000,
+        extensions: prfExtensionInput(),
       },
     });
-
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(credentialIdHex);
-    const { privateKeyToAccount } = await import("viem/accounts");
-    const account = privateKeyToAccount(privateKey);
-
-    return {
-      credential,
-      privateKey,
-      address: account.address,
-    };
+    prfSecret = requirePrfSecret(result.clientExtensionResults);
   } catch (error) {
+    // A missing PRF secret is a hard error (thrown), but a cancelled prompt
+    // returns null to preserve the existing unlock UX.
+    if (error instanceof PrfUnsupportedError) throw error;
     console.error("Authentication failed:", error);
     return null;
   }
+
+  // Resolve the key through the imported-aware path. Decryption and
+  // integrity errors deliberately throw past this function so the UI
+  // shows the real reason instead of a generic auth failure.
+  const storedWallet = getStoredWallets().find(
+    (w) => w.credentialId === credential.credentialId
+  );
+  const imported = isImportedCredential(
+    credential.credentialId,
+    credential.isImported
+  );
+  const { privateKey, address } = await resolveKeyForCredential(
+    credential.credentialId,
+    prfSecret,
+    imported,
+    storedWallet?.address
+  );
+
+  // Self-heal older credential blobs saved without the isImported flag
+  const resolvedCredential: PasskeyCredential = {
+    ...credential,
+    isImported: imported,
+  };
+  localStorage.setItem(
+    CREDENTIAL_STORAGE_KEY,
+    JSON.stringify(resolvedCredential)
+  );
+
+  return {
+    credential: resolvedCredential,
+    privateKey,
+    address,
+  };
 }
 
 // Extract username from userHandle (which contains "username-timestamp")
@@ -404,92 +510,143 @@ function base64urlToString(base64url: string): string {
 export async function recoverWallet(): Promise<RecoveryResult | null> {
   const challenge = generateChallenge();
 
+  let authResponse;
+  let prfSecret: Uint8Array;
   try {
     // Don't specify allowCredentials - browser will show all registered passkeys
-    const authResponse = await startAuthentication({
+    authResponse = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
         userVerification: "required",
         timeout: 60000,
+        extensions: prfExtensionInput(),
         // No allowCredentials = discoverable credential mode
       },
     });
-
-    // Get the credential ID from the response
-    const credentialId = authResponse.id;
-    const credentialIdHex = base64urlToHex(credentialId);
-
-    // Check if wallet already exists in local storage
-    const wallets = getStoredWallets();
-    const existingWallet = wallets.find((w) => w.credentialId === credentialId);
-    const alreadyExisted = !!existingWallet;
-
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(credentialIdHex);
-    const { privateKeyToAccount } = await import("viem/accounts");
-    const account = privateKeyToAccount(privateKey);
-
-    // Try to get username from multiple sources:
-    // 1. First try the passkey's userHandle (most reliable for cross-device recovery)
-    // 2. Fall back to local storage if available
-    let username: string | undefined;
-
-    // The userHandle in the auth response contains the user.id from registration
-    // which was set to "username-timestamp"
-    username = extractUsernameFromUserHandle(authResponse.response.userHandle);
-
-    // Fall back to checking local storage
-    if (!username && existingWallet) {
-      username = existingWallet.username;
-    }
-
-    // Create credential object
-    const credential: PasskeyCredential = {
-      credentialId,
-      credentialIdHex,
-      publicKey: credentialIdHex,
-      createdAt: existingWallet?.createdAt || Date.now(),
-      username,
-    };
-
-    // Save as current credential
-    localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
-
-    // Only add to wallets list if it doesn't already exist
-    if (!alreadyExisted) {
-      saveWalletToList({
-        credentialId,
-        credentialIdHex,
-        username: username || "Recovered Wallet",
-        address: account.address,
-        createdAt: Date.now(),
-      });
-    }
-
-    return {
-      wallet: {
-        credential,
-        privateKey,
-        address: account.address,
-      },
-      alreadyExisted,
-    };
+    prfSecret = requirePrfSecret(authResponse.clientExtensionResults);
   } catch (error) {
+    if (error instanceof PrfUnsupportedError) throw error;
     console.error("Recovery failed:", error);
     return null;
   }
+
+  // Get the credential ID from the response
+  const credentialId = authResponse.id;
+  const credentialIdHex = base64urlToHex(credentialId);
+
+  // Check if wallet already exists in local storage
+  const wallets = getStoredWallets();
+  const existingWallet = wallets.find((w) => w.credentialId === credentialId);
+  const alreadyExisted = !!existingWallet;
+
+  // Imported passkeys were registered with user.id "import-{address}-{timestamp}",
+  // so they are detectable via userHandle even on a device with no local data.
+  // The full pattern (not just the "import-" prefix) must match, because
+  // regular wallets store "{username}-{timestamp}" and a username can
+  // legitimately be "import".
+  let decodedHandle: string | undefined;
+  try {
+    decodedHandle = authResponse.response.userHandle
+      ? base64urlToString(authResponse.response.userHandle)
+      : undefined;
+  } catch {
+    decodedHandle = undefined;
+  }
+  const importHandleMatch = decodedHandle?.match(
+    /^import-(0x[0-9a-fA-F]{40})-\d+$/
+  );
+  const handleIsImport = !!importHandleMatch;
+  const importAddress = importHandleMatch?.[1];
+  const imported =
+    isImportedCredential(credentialId, existingWallet?.isImported) ||
+    handleIsImport;
+
+  // An imported wallet's key only exists as an encrypted blob on the device
+  // that imported it. Never fall through to derivation - that would open a
+  // different, empty address.
+  if (imported && !(credentialId in getEncryptedKeys())) {
+    const shortAddress = importAddress ? ` (${formatAddress(importAddress)})` : "";
+    throw new Error(
+      `This passkey belongs to an imported wallet${shortAddress}. Its key cannot be recovered from the passkey alone. Re-import the private key on this device.`
+    );
+  }
+
+  const { privateKey, address } = await resolveKeyForCredential(
+    credentialId,
+    prfSecret,
+    imported,
+    existingWallet?.address ?? importAddress
+  );
+
+  // Try to get username from multiple sources:
+  // 1. First try the passkey's userHandle (most reliable for cross-device recovery)
+  // 2. Fall back to local storage if available
+  let username: string | undefined;
+
+  // The userHandle in the auth response contains the user.id from registration
+  // which was set to "username-timestamp" ("import-{address}-{timestamp}" is
+  // an internal marker, not a display name)
+  if (!handleIsImport) {
+    username = extractUsernameFromUserHandle(authResponse.response.userHandle);
+  }
+
+  // Fall back to checking local storage
+  if (!username && existingWallet) {
+    username = existingWallet.username;
+  }
+
+  // Create credential object
+  const credential: PasskeyCredential = {
+    credentialId,
+    credentialIdHex,
+    publicKey: credentialIdHex,
+    createdAt: existingWallet?.createdAt || Date.now(),
+    username,
+    isImported: imported,
+  };
+
+  // Save as current credential
+  localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+
+  // Only add to wallets list if it doesn't already exist
+  if (!alreadyExisted) {
+    saveWalletToList({
+      credentialId,
+      credentialIdHex,
+      username: username || (imported ? "Imported Wallet" : "Recovered Wallet"),
+      address,
+      createdAt: Date.now(),
+      isImported: imported,
+    });
+  }
+
+  return {
+    wallet: {
+      credential,
+      privateKey,
+      address,
+    },
+    alreadyExisted,
+  };
 }
 
 // Authenticate with a specific stored wallet
 export async function authenticateWithWallet(
   storedWallet: StoredWallet
 ): Promise<PasskeyWallet | null> {
+  // Imported wallets must go through decryption, never key derivation.
+  // Delegation replaces this function's own ceremony, so still one prompt.
+  if (isImportedCredential(storedWallet.credentialId, storedWallet.isImported)) {
+    return unlockImportedWallet({ ...storedWallet, isImported: true });
+  }
+
   const challenge = generateChallenge();
 
+  let prfSecret: Uint8Array;
   try {
-    // Authenticate with the specific credential
-    await startAuthentication({
+    // Authenticate with the specific credential, requesting the PRF secret
+    const result = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
@@ -501,35 +658,40 @@ export async function authenticateWithWallet(
         ],
         userVerification: "required",
         timeout: 60000,
+        extensions: prfExtensionInput(),
       },
     });
-
-    // Derive private key deterministically from credential ID
-    const privateKey = await derivePrivateKey(storedWallet.credentialIdHex);
-    const { privateKeyToAccount } = await import("viem/accounts");
-    const account = privateKeyToAccount(privateKey);
-
-    // Create credential object
-    const credential: PasskeyCredential = {
-      credentialId: storedWallet.credentialId,
-      credentialIdHex: storedWallet.credentialIdHex,
-      publicKey: storedWallet.credentialIdHex,
-      createdAt: storedWallet.createdAt,
-      username: storedWallet.username,
-    };
-
-    // Save as current credential
-    localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
-
-    return {
-      credential,
-      privateKey,
-      address: account.address,
-    };
+    prfSecret = requirePrfSecret(result.clientExtensionResults);
   } catch (error) {
+    if (error instanceof PrfUnsupportedError) throw error;
     console.error("Authentication failed:", error);
     return null;
   }
+
+  const { privateKey, address } = await resolveKeyForCredential(
+    storedWallet.credentialId,
+    prfSecret,
+    false,
+    storedWallet.address
+  );
+
+  // Create credential object
+  const credential: PasskeyCredential = {
+    credentialId: storedWallet.credentialId,
+    credentialIdHex: storedWallet.credentialIdHex,
+    publicKey: storedWallet.credentialIdHex,
+    createdAt: storedWallet.createdAt,
+    username: storedWallet.username,
+  };
+
+  // Save as current credential
+  localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+
+  return {
+    credential,
+    privateKey,
+    address,
+  };
 }
 
 // Check if a passkey credential exists
@@ -664,26 +826,14 @@ function removeEncryptedKey(credentialId: string): void {
   localStorage.setItem(ENCRYPTED_KEYS_STORAGE_KEY, JSON.stringify(keys));
 }
 
-// Derive an AES encryption key from the passkey credential ID
-async function deriveEncryptionKey(
-  credentialIdHex: string
-): Promise<CryptoKey> {
-  const credentialBytes = hexToBytes(credentialIdHex as `0x${string}`);
+// Derive an AES-GCM encryption key from the PRF secret (domain-separated from
+// the wallet key by the HKDF info string). Imported wallets encrypt their
+// private key under this so the ciphertext is bound to the passkey secret.
+async function deriveEncryptionKey(prfSecret: Uint8Array): Promise<CryptoKey> {
+  const keyBytes = hkdf(sha256, prfSecret, undefined, ENC_HKDF_INFO, 32);
+  // Copy into a standalone ArrayBuffer for crypto.subtle
+  const keyBuffer = keyBytes.slice().buffer;
 
-  // Use a different domain separator for encryption (different from wallet derivation)
-  const domainSeparator = new TextEncoder().encode(
-    "PunkWallet-Import-Encryption-v1"
-  );
-  const combined = concat([domainSeparator, credentialBytes]);
-
-  // Hash to get key material
-  const keyMaterial = keccak256(combined);
-  const keyBytes = hexToBytes(keyMaterial);
-
-  // Convert to ArrayBuffer for crypto.subtle
-  const keyBuffer = new Uint8Array(keyBytes).buffer;
-
-  // Import as AES-GCM key
   return await crypto.subtle.importKey(
     "raw",
     keyBuffer,
@@ -746,6 +896,72 @@ function base64urlToArrayBuffer(base64url: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+// Decrypt the AES-GCM-stored private key for an imported wallet.
+// Throws (never returns null) so callers surface a specific, loud error
+// instead of falling back to a derived key.
+async function decryptImportedPrivateKey(
+  credentialId: string,
+  prfSecret: Uint8Array
+): Promise<`0x${string}`> {
+  const encryptedData = getEncryptedKeys()[credentialId];
+  if (!encryptedData) {
+    throw new Error(
+      "This wallet was imported from a private key, but its encrypted key is not on this device. Re-import the private key to restore it."
+    );
+  }
+
+  const encryptionKey = await deriveEncryptionKey(prfSecret);
+  const privateKey = await decryptPrivateKey(
+    encryptedData.iv,
+    encryptedData.ciphertext,
+    encryptionKey
+  );
+  return privateKey as `0x${string}`;
+}
+
+// Resolve key material after a passkey ceremony. Imported wallets must
+// decrypt their stored key - deriving from the credential ID would silently
+// produce a different (empty) address. When the expected address is known,
+// a mismatch fails loudly rather than opening the wrong wallet.
+async function resolveKeyForCredential(
+  credentialId: string,
+  prfSecret: Uint8Array,
+  isImported: boolean,
+  expectedAddress?: string
+): Promise<{ privateKey: `0x${string}`; address: `0x${string}` }> {
+  const privateKey = isImported
+    ? await decryptImportedPrivateKey(credentialId, prfSecret)
+    : derivePrivateKeyFromPrf(prfSecret);
+
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const account = privateKeyToAccount(privateKey);
+
+  if (
+    expectedAddress &&
+    expectedAddress.toLowerCase() !== account.address.toLowerCase()
+  ) {
+    // Lead with the actionable part - the global error toast clamps long
+    // messages, so the warning must survive truncation
+    throw new Error(
+      `Wallet integrity check failed. Do not send funds. The unlocked key does not match the stored address ${formatAddress(expectedAddress)}. Unlock from the wallet list or re-import the private key.`
+    );
+  }
+
+  return { privateKey, address: account.address };
+}
+
+// Single source of truth for "is this credential an imported wallet?".
+// The encrypted-keys check covers credential blobs saved before the
+// isImported flag was written consistently everywhere.
+function isImportedCredential(credentialId: string, hint?: boolean): boolean {
+  if (hint === true) return true;
+  const stored = getStoredWallets().find(
+    (w) => w.credentialId === credentialId
+  );
+  if (stored?.isImported) return true;
+  return credentialId in getEncryptedKeys();
+}
+
 // Validate private key format
 export function isValidPrivateKey(key: string): boolean {
   // Check if it's a valid hex string with 0x prefix and 64 hex chars (32 bytes)
@@ -804,14 +1020,19 @@ export async function importWalletFromPrivateKey(
         },
         timeout: 60000,
         attestation: "none",
+        extensions: prfExtensionInput(),
       },
     });
 
     const credentialId = registrationResponse.id;
     const credentialIdHex = base64urlToHex(credentialId);
 
-    // Step 2: Derive encryption key from the passkey's credential ID
-    const encryptionKey = await deriveEncryptionKey(credentialIdHex);
+    // Step 2: Derive the AES encryption key from the passkey's PRF secret
+    // (fall back to a get() ceremony if create() returned no PRF output)
+    const prfSecret =
+      readPrfSecret(registrationResponse.clientExtensionResults) ??
+      (await evaluatePrfForCredential(credentialId));
+    const encryptionKey = await deriveEncryptionKey(prfSecret);
 
     // Step 3: Encrypt the imported private key
     const { iv, ciphertext } = await encryptPrivateKey(
@@ -869,9 +1090,10 @@ export async function unlockImportedWallet(
 
   const challenge = generateChallenge();
 
+  let prfSecret: Uint8Array;
   try {
-    // Step 1: Authenticate with the passkey
-    await startAuthentication({
+    // Step 1: Authenticate with the passkey and obtain the PRF secret
+    const result = await startAuthentication({
       optionsJSON: {
         challenge: bufferToBase64url(challenge.buffer as ArrayBuffer),
         rpId: getPasskeyRpId(),
@@ -883,54 +1105,44 @@ export async function unlockImportedWallet(
         ],
         userVerification: "required",
         timeout: 60000,
+        extensions: prfExtensionInput(),
       },
     });
-
-    // Step 2: Get the encrypted key
-    const encryptedKeys = getEncryptedKeys();
-    const encryptedData = encryptedKeys[storedWallet.credentialId];
-
-    if (!encryptedData) {
-      console.error("Encrypted key not found for imported wallet");
-      return null;
-    }
-
-    // Step 3: Derive the decryption key from credential ID
-    const encryptionKey = await deriveEncryptionKey(
-      storedWallet.credentialIdHex
-    );
-
-    // Step 4: Decrypt the private key
-    const privateKey = await decryptPrivateKey(
-      encryptedData.iv,
-      encryptedData.ciphertext,
-      encryptionKey
-    );
-
-    const { privateKeyToAccount } = await import("viem/accounts");
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-
-    const credential: PasskeyCredential = {
-      credentialId: storedWallet.credentialId,
-      credentialIdHex: storedWallet.credentialIdHex,
-      publicKey: storedWallet.credentialIdHex,
-      createdAt: storedWallet.createdAt,
-      username: storedWallet.username,
-      isImported: true,
-    };
-
-    // Save as current credential
-    localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
-
-    return {
-      credential,
-      privateKey: privateKey as `0x${string}`,
-      address: account.address,
-    };
+    prfSecret = requirePrfSecret(result.clientExtensionResults);
   } catch (error) {
+    // User cancelled or WebAuthn failed. Decryption and integrity errors
+    // below throw instead, so a broken key store is never mistaken for
+    // a cancelled prompt. A missing PRF secret is also a hard error.
+    if (error instanceof PrfUnsupportedError) throw error;
     console.error("Unlock imported wallet failed:", error);
     return null;
   }
+
+  // Step 2: Decrypt the stored key and verify it matches the wallet address
+  const { privateKey, address } = await resolveKeyForCredential(
+    storedWallet.credentialId,
+    prfSecret,
+    true,
+    storedWallet.address
+  );
+
+  const credential: PasskeyCredential = {
+    credentialId: storedWallet.credentialId,
+    credentialIdHex: storedWallet.credentialIdHex,
+    publicKey: storedWallet.credentialIdHex,
+    createdAt: storedWallet.createdAt,
+    username: storedWallet.username,
+    isImported: true,
+  };
+
+  // Save as current credential
+  localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+
+  return {
+    credential,
+    privateKey,
+    address,
+  };
 }
 
 // Enhanced remove that also cleans up encrypted keys

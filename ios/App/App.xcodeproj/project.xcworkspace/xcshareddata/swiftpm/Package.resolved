@@ -1,5 +1,5 @@
 {
-  "originHash" : "3eb3dd18d5eba7282f386c43906d0125c8207fd00d9d7c79868abe2b20297945",
+  "originHash" : "2b7b7d9fd6bfe1fe1154b001e43b05ece20f7e083f94ae216248c734dc68f82b",
   "pins" : [
     {
       "identity" : "capacitor-swift-pm",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "596259033e94829dffc552a40e7129262122995e",
         "version" : "8.0.0"
+      }
+    },
+    {
+      "identity" : "clear-signing",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/llbartekll/clear-signing",
+      "state" : {
+        "revision" : "f632a97d768ec2c4377c34ed3e6cfe08d17d2ffc",
+        "version" : "0.1.3"
       }
     },
     {

@@ -16,6 +16,10 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		D4A10C662EEA1B9C00C7F511 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A10C652EEA1B9C00C7F511 /* SceneDelegate.swift */; };
+		CA5E000000000000000000B1 /* ClearSigningPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A1 /* ClearSigningPlugin.swift */; };
+		CA5E000000000000000000B2 /* StaticDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A2 /* StaticDataProvider.swift */; };
+		CA5E000000000000000000B3 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E000000000000000000A3 /* MainViewController.swift */; };
+		CA5E000000000000000000C3 /* ClearSigning in Frameworks */ = {isa = PBXBuildFile; productRef = CA5E000000000000000000C2 /* ClearSigning */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +35,9 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		D4A10C652EEA1B9C00C7F511 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		D4FD04D42EE7B3980087DAE9 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		CA5E000000000000000000A1 /* ClearSigningPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearSigningPlugin.swift; sourceTree = "<group>"; };
+		CA5E000000000000000000A2 /* StaticDataProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaticDataProvider.swift; sourceTree = "<group>"; };
+		CA5E000000000000000000A3 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -39,6 +46,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				CA5E000000000000000000C3 /* ClearSigning in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +74,9 @@
 			isa = PBXGroup;
 			children = (
 				D4A10C652EEA1B9C00C7F511 /* SceneDelegate.swift */,
+				CA5E000000000000000000A1 /* ClearSigningPlugin.swift */,
+				CA5E000000000000000000A2 /* StaticDataProvider.swift */,
+				CA5E000000000000000000A3 /* MainViewController.swift */,
 				D4FD04D42EE7B3980087DAE9 /* App.entitlements */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -97,6 +108,7 @@
 			name = App;
 			packageProductDependencies = (
 				4D22ABE82AF431CB00220026 /* CapApp-SPM */,
+				CA5E000000000000000000C2 /* ClearSigning */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -129,6 +141,7 @@
 			mainGroup = 504EC2FB1FED79650016851F;
 			packageReferences = (
 				D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */,
+				CA5E000000000000000000C1 /* XCRemoteSwiftPackageReference "clear-signing" */,
 			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
@@ -162,6 +175,9 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				D4A10C662EEA1B9C00C7F511 /* SceneDelegate.swift in Sources */,
+				CA5E000000000000000000B1 /* ClearSigningPlugin.swift in Sources */,
+				CA5E000000000000000000B2 /* StaticDataProvider.swift in Sources */,
+				CA5E000000000000000000B3 /* MainViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -374,11 +390,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		CA5E000000000000000000C1 /* XCRemoteSwiftPackageReference "clear-signing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/llbartekll/clear-signing";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		CA5E000000000000000000C2 /* ClearSigning */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CA5E000000000000000000C1 /* XCRemoteSwiftPackageReference "clear-signing" */;
+			productName = ClearSigning;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
