@@ -37,6 +37,15 @@ export interface PasskeyCredential {
   isImported?: boolean; // true if wallet was imported via private key
 }
 
+// How a wallet's key comes into existence. Recorded so a build/config change
+// (wrong RP ID, changed derivation) is caught before a ceremony instead of
+// silently opening a different, empty address.
+export interface WalletDerivationMeta {
+  rpId: string;
+  derivation: "prf-hkdf-eoa-v2" | "imported-aes-gcm-v2";
+  prfSaltV: 2;
+}
+
 export interface StoredWallet {
   credentialId: string;
   credentialIdHex: string;
@@ -44,6 +53,7 @@ export interface StoredWallet {
   address: string;
   createdAt: number;
   isImported?: boolean; // true if wallet was imported via private key
+  meta?: WalletDerivationMeta; // absent on entries created before mid-2026, backfilled on unlock
 }
 
 // The only wallet shape handed to the UI. Deliberately contains NO key
@@ -62,6 +72,16 @@ export interface PublicWalletInfo {
 const CREDENTIAL_STORAGE_KEY = "punk_wallet_credential";
 const WALLETS_LIST_KEY = "punk_wallet_list";
 
+// The RP ID is misconfigured or missing. Passkeys are bound to the RP ID, so
+// proceeding with a guessed value would create/unlock wallets on the wrong
+// domain. This must surface loudly, never be treated as a cancelled prompt.
+export class RpIdConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RpIdConfigurationError";
+  }
+}
+
 // Passkey RP (Relying Party) configuration
 // This MUST match the domain in your apple-app-site-association file
 // Set NEXT_PUBLIC_PASSKEY_RP_ID in your .env.local or Vercel environment
@@ -75,15 +95,18 @@ function getPasskeyRpId(): string {
       }
     )?.Capacitor?.isNativePlatform?.();
 
-  // For Capacitor apps, ALWAYS use the production RP ID from env var
-  // (Capacitor runs on localhost internally but needs the real domain for passkeys)
+  const envRpId =
+    typeof process !== "undefined"
+      ? process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
+      : undefined;
+
+  // Capacitor runs on localhost internally, so its hostname is never a valid
+  // RP ID. Fail closed instead of silently binding passkeys to "localhost".
   if (isCapacitor) {
-    if (
-      typeof process !== "undefined" &&
-      process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
-    ) {
-      return process.env.NEXT_PUBLIC_PASSKEY_RP_ID;
-    }
+    if (envRpId) return envRpId;
+    throw new RpIdConfigurationError(
+      "NEXT_PUBLIC_PASSKEY_RP_ID is not set. The native app cannot derive a passkey domain from its internal origin - set the env var at build time."
+    );
   }
 
   // For browser-based local development (not Capacitor), use localhost
@@ -95,14 +118,17 @@ function getPasskeyRpId(): string {
   }
 
   // Use environment variable if set (for production web)
-  if (
-    typeof process !== "undefined" &&
-    process.env?.NEXT_PUBLIC_PASSKEY_RP_ID
-  ) {
-    return process.env.NEXT_PUBLIC_PASSKEY_RP_ID;
+  if (envRpId) return envRpId;
+
+  // Fail closed in production: a hostname-derived RP ID would silently bind
+  // new passkeys to whatever domain happens to serve the app.
+  if (process.env.NODE_ENV === "production") {
+    throw new RpIdConfigurationError(
+      "NEXT_PUBLIC_PASSKEY_RP_ID is not set. Production builds must pin the passkey domain explicitly."
+    );
   }
 
-  // Fallback to current hostname
+  // Dev-only fallback to the current hostname
   if (typeof window !== "undefined") {
     return window.location.hostname;
   }
@@ -245,6 +271,43 @@ export function getStoredWallets(): StoredWallet[] {
   }
 }
 
+// Metadata stamped on every wallet entry at create/import/recover time (and
+// backfilled on unlock for older entries).
+function buildDerivationMeta(imported: boolean): WalletDerivationMeta {
+  return {
+    rpId: getPasskeyRpId(),
+    derivation: imported ? "imported-aes-gcm-v2" : "prf-hkdf-eoa-v2",
+    prfSaltV: 2,
+  };
+}
+
+// Pre-ceremony guard: if the stored wallet records the RP ID it was created
+// under and the app is now configured for a different one, stop before the
+// prompt. The post-derivation address check remains the ultimate gate; this
+// just turns a confusing failure into an actionable message.
+function assertRpIdMatchesStored(credentialId: string): void {
+  const stored = getStoredWallets().find(
+    (w) => w.credentialId === credentialId
+  );
+  const recordedRpId = stored?.meta?.rpId;
+  if (!recordedRpId) return;
+  const configured = getPasskeyRpId();
+  if (recordedRpId !== configured) {
+    throw new RpIdConfigurationError(
+      `This wallet's passkey was created for "${recordedRpId}" but the app is configured for "${configured}". Unlocking is blocked - fix NEXT_PUBLIC_PASSKEY_RP_ID or use the original domain.`
+    );
+  }
+}
+
+// Stamp derivation metadata onto an existing list entry (no-op when present)
+function backfillDerivationMeta(credentialId: string, imported: boolean): void {
+  const wallets = getStoredWallets();
+  const entry = wallets.find((w) => w.credentialId === credentialId);
+  if (!entry || entry.meta) return;
+  entry.meta = buildDerivationMeta(imported);
+  localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(wallets));
+}
+
 // Save wallet to the list
 export function saveWalletToList(wallet: StoredWallet): void {
   const wallets = getStoredWallets();
@@ -375,6 +438,8 @@ async function authenticateForPrf(credentialId?: string): Promise<{
       },
     });
   } catch (error) {
+    // Configuration problems must never masquerade as a cancelled prompt
+    if (error instanceof RpIdConfigurationError) throw error;
     console.error("Authentication failed:", error);
     throw new UserCancelledError(error);
   }
@@ -404,6 +469,7 @@ async function withKeyForCredential<T>(
     opts.credentialId,
     opts.isImportedHint
   );
+  assertRpIdMatchesStored(opts.credentialId);
   const { prfSecret } = await authenticateForPrf(opts.credentialId);
   try {
     const resolved = await resolveKeyForCredential(
@@ -513,6 +579,7 @@ export async function createWalletWithPasskey(
     username,
     address,
     createdAt: credential.createdAt,
+    meta: buildDerivationMeta(false),
   });
 
   // Store current credential
@@ -571,6 +638,7 @@ export async function unlockCurrentWallet(): Promise<PublicWalletInfo | null> {
     CREDENTIAL_STORAGE_KEY,
     JSON.stringify(resolvedCredential)
   );
+  backfillDerivationMeta(credential.credentialId, imported);
 
   return {
     credentialId: credential.credentialId,
@@ -725,7 +793,10 @@ export async function recoverWalletInfo(): Promise<{
       address,
       createdAt: Date.now(),
       isImported: imported,
+      meta: buildDerivationMeta(imported),
     });
+  } else {
+    backfillDerivationMeta(credentialId, imported);
   }
 
   return {
@@ -777,6 +848,7 @@ export async function unlockWallet(
     isImported: imported,
   };
   localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
+  backfillDerivationMeta(storedWallet.credentialId, imported);
 
   return {
     credentialId: storedWallet.credentialId,
@@ -879,6 +951,7 @@ export async function deleteAccountWithAuth(
 
     return true;
   } catch (error) {
+    if (error instanceof RpIdConfigurationError) throw error;
     console.error("Delete authentication failed:", error);
     return false;
   }
@@ -1131,6 +1204,7 @@ export async function importWalletFromPrivateKey(
       address: account.address,
       createdAt: credential.createdAt,
       isImported: true,
+      meta: buildDerivationMeta(true),
     });
 
     // Store current credential
@@ -1145,6 +1219,14 @@ export async function importWalletFromPrivateKey(
       isImported: true,
     };
   } catch (error) {
+    // Hard errors must surface with their real message, not a generic
+    // "check the private key" hint
+    if (
+      error instanceof RpIdConfigurationError ||
+      error instanceof PrfUnsupportedError
+    ) {
+      throw error;
+    }
     console.error("Import wallet failed:", error);
     return null;
   }
