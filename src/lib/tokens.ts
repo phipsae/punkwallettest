@@ -7,7 +7,7 @@ import {
   erc20Abi,
 } from "viem";
 import { createWalletClientForNetwork, getAllNetworks, getRpcUrl } from "./wallet";
-import { privateKeyToAccount } from "viem/accounts";
+import type { PrivateKeyAccount } from "viem/accounts";
 
 // Token interface
 export interface Token {
@@ -319,15 +319,14 @@ export async function getTokenInfo(
 
 // Send ERC20 tokens
 export async function sendToken(
-  privateKey: Hex,
+  account: PrivateKeyAccount,
   token: Token,
   to: Hex,
   amount: string,
   networkId: string
 ): Promise<{ hash: Hex; success: boolean; error?: string }> {
   try {
-    const account = privateKeyToAccount(privateKey);
-    const walletClient = createWalletClientForNetwork(privateKey, networkId);
+    const walletClient = createWalletClientForNetwork(account, networkId);
     const publicClient = getPublicClient(networkId);
 
     // Parse amount to token units

@@ -10,7 +10,7 @@ import {
   defineChain,
 } from "viem";
 import { normalize } from "viem/ens";
-import { privateKeyToAccount } from "viem/accounts";
+import type { PrivateKeyAccount } from "viem/accounts";
 import { mainnet, arbitrum, base, optimism, linea, zkSync, polygon } from "viem/chains";
 
 // Custom network interface for user-added networks
@@ -249,15 +249,15 @@ export function createPublicClientForNetwork(
   });
 }
 
-// Create wallet client for signing transactions
+// Create wallet client for signing transactions. Takes a viem account, not a
+// raw private key - key material stays behind the signer boundary (signer.ts).
 export function createWalletClientForNetwork(
-  privateKey: `0x${string}`,
+  account: PrivateKeyAccount,
   networkId: string = DEFAULT_NETWORK
 ): WalletClient {
   const networks = getAllNetworks();
   const chain = networks[networkId] || networks[DEFAULT_NETWORK];
   const rpcUrl = getRpcUrl(networkId);
-  const account = privateKeyToAccount(privateKey);
 
   return createWalletClient({
     account,
@@ -287,17 +287,15 @@ export async function getBalance(
 
 // Send ETH transaction
 export async function sendETH(
-  privateKey: `0x${string}`,
+  account: PrivateKeyAccount,
   to: `0x${string}`,
   amountEth: string,
   networkId: string = DEFAULT_NETWORK
 ): Promise<TransactionResult> {
-  const walletClient = createWalletClientForNetwork(privateKey, networkId);
+  const walletClient = createWalletClientForNetwork(account, networkId);
   const publicClient = createPublicClientForNetwork(networkId);
 
   try {
-    const account = privateKeyToAccount(privateKey);
-
     // Parse amount to wei
     const value = parseEther(amountEth);
 

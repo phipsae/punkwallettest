@@ -5,22 +5,28 @@ import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
 import { Capacitor } from "@capacitor/core";
 import {
-  registerPasskey,
-  authenticateAndDeriveWallet,
+  createWalletWithPasskey,
   hasStoredCredential,
   clearStoredCredential,
-  recoverWallet,
+  recoverWalletInfo,
   getStoredWallets,
-  authenticateWithWallet,
   deleteAccountWithAuth,
   importWalletFromPrivateKey,
-  unlockImportedWallet,
   isValidPrivateKey,
   updateWalletName,
   isMacCatalystApp,
-  type PasskeyWallet,
+  UserCancelledError,
+  type PublicWalletInfo,
   type StoredWallet,
 } from "@/lib/passkey";
+import {
+  unlockIdentity,
+  unlockIdentityFor,
+  signAndSendEth,
+  signAndSendToken,
+  approveWalletConnectRequest,
+  exportPrivateKey,
+} from "@/lib/signer";
 import PunkAvatar, { PunkBlockie } from "./PunkAvatar";
 import dynamic from "next/dynamic";
 
@@ -31,7 +37,6 @@ const PaymentScanner = dynamic(() => import("./PaymentScanner"), {
 });
 import {
   getBalance,
-  sendETH,
   isValidAddress,
   formatAddress,
   getExplorerUrl,
@@ -55,7 +60,6 @@ import {
 } from "@/lib/wallet";
 import {
   getAllTokenBalances,
-  sendToken,
   getTokenInfo,
   addCustomToken,
   removeCustomToken,
@@ -72,7 +76,7 @@ import {
   rejectSession,
   getActiveSessions,
   disconnectSession,
-  handleSessionRequest,
+  rejectSessionRequest,
   formatRequestDisplay,
   updateSessionsAccount,
   isWalletConnectAvailable,
@@ -105,7 +109,7 @@ type View =
 
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
-  const [wallet, setWallet] = useState<PasskeyWallet | null>(null);
+  const [wallet, setWallet] = useState<PublicWalletInfo | null>(null);
   const [balance, setBalance] = useState<string>("0");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,11 +183,15 @@ export default function WalletApp() {
   const [showPaymentScanner, setShowPaymentScanner] = useState(false);
   const previousWalletAddress = useRef<string | null>(null);
 
-  // Export private key state
+  // Export private key state. revealedKey is the only place outside the
+  // signer boundary that may hold key material - short-lived by design:
+  // cleared on hide, view exit, a 30s timeout, and app backgrounding.
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [exportConfirmed, setExportConfirmed] = useState(false);
   const [isAuthenticatingForExport, setIsAuthenticatingForExport] =
     useState(false);
+  const revealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Delete account state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -491,6 +499,20 @@ export default function WalletApp() {
     fetchEnsData();
   }, [wallet?.address]);
 
+  // Leaving the export view (or locking) must wipe the transiently revealed
+  // private key immediately.
+  useEffect(() => {
+    if (view !== "export") {
+      if (revealTimeoutRef.current) {
+        clearTimeout(revealTimeoutRef.current);
+        revealTimeoutRef.current = null;
+      }
+      setRevealedKey(null);
+      setShowPrivateKey(false);
+      setExportConfirmed(false);
+    }
+  }, [view]);
+
   // Create new wallet
   const handleCreateWallet = async () => {
     if (!username.trim()) {
@@ -502,18 +524,16 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      await registerPasskey(username);
-      const walletData = await authenticateAndDeriveWallet();
-      if (walletData) {
-        setWallet(walletData);
-        setHasCredential(true);
-        // Refresh the stored wallets list
-        const wallets = getStoredWallets();
-        setStoredWallets(wallets);
-        setView("wallet");
-        setSuccess("Wallet created successfully!");
-        setTimeout(() => setSuccess(null), 3000);
-      }
+      // One ceremony: registration derives the address, no second unlock
+      const walletData = await createWalletWithPasskey(username);
+      setWallet(walletData);
+      setHasCredential(true);
+      // Refresh the stored wallets list
+      const wallets = getStoredWallets();
+      setStoredWallets(wallets);
+      setView("wallet");
+      setSuccess("Wallet created successfully!");
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create wallet");
     } finally {
@@ -527,7 +547,7 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const walletData = await authenticateAndDeriveWallet();
+      const walletData = await unlockIdentity();
       if (walletData) {
         setWallet(walletData);
         setView("wallet");
@@ -580,23 +600,25 @@ export default function WalletApp() {
     try {
       let result;
 
+      // Each send runs its own passkey ceremony inside the signer boundary -
+      // the private key never reaches this component.
       if (selectedToken) {
         // Send ERC20 token
-        result = await sendToken(
-          wallet.privateKey,
-          selectedToken,
-          recipientAddress,
-          sendAmount,
-          network
-        );
+        result = await signAndSendToken({
+          wallet,
+          token: selectedToken,
+          to: recipientAddress,
+          amount: sendAmount,
+          networkId: network,
+        });
       } else {
         // Send ETH
-        result = await sendETH(
-          wallet.privateKey,
-          recipientAddress,
-          sendAmount,
-          network
-        );
+        result = await signAndSendEth({
+          wallet,
+          to: recipientAddress,
+          amountEth: sendAmount,
+          networkId: network,
+        });
       }
 
       if (result.success) {
@@ -619,6 +641,8 @@ export default function WalletApp() {
         setError(result.error || "Transaction failed");
       }
     } catch (err) {
+      // A dismissed passkey prompt is not an error - nothing was signed
+      if (err instanceof UserCancelledError) return;
       setError(err instanceof Error ? err.message : "Transaction failed");
     } finally {
       setLoading(false);
@@ -803,11 +827,12 @@ export default function WalletApp() {
     try {
       // Create StoredWallet from current wallet
       const storedWallet: StoredWallet = {
-        credentialId: wallet.credential.credentialId,
-        credentialIdHex: wallet.credential.credentialIdHex,
-        username: wallet.credential.username || "Wallet",
+        credentialId: wallet.credentialId,
+        credentialIdHex: wallet.credentialIdHex,
+        username: wallet.username || "Wallet",
         address: wallet.address,
-        createdAt: wallet.credential.createdAt,
+        createdAt: wallet.createdAt,
+        isImported: wallet.isImported,
       };
 
       const success = await deleteAccountWithAuth(storedWallet);
@@ -842,15 +867,12 @@ export default function WalletApp() {
     if (!wallet || !editedName.trim()) return;
 
     const newName = editedName.trim();
-    updateWalletName(wallet.credential.credentialId, newName);
+    updateWalletName(wallet.credentialId, newName);
 
     // Update local state
     setWallet({
       ...wallet,
-      credential: {
-        ...wallet.credential,
-        username: newName,
-      },
+      username: newName,
     });
 
     // Refresh stored wallets list
@@ -874,9 +896,9 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      const result = await recoverWallet();
+      const result = await recoverWalletInfo();
       if (result) {
-        setWallet(result.wallet);
+        setWallet(result.info);
         setHasCredential(true);
         setStoredWallets(getStoredWallets());
         setView("wallet");
@@ -902,14 +924,8 @@ export default function WalletApp() {
     setError(null);
 
     try {
-      let walletData: PasskeyWallet | null = null;
-
-      // Use different unlock method for imported wallets
-      if (walletInfo.isImported) {
-        walletData = await unlockImportedWallet(walletInfo);
-      } else {
-        walletData = await authenticateWithWallet(walletInfo);
-      }
+      // One unlock path for derived and imported wallets alike
+      const walletData = await unlockIdentityFor(walletInfo);
 
       if (walletData) {
         setWallet(walletData);
@@ -957,11 +973,8 @@ export default function WalletApp() {
       if (walletData) {
         setWallet(walletData);
         setHasCredential(true);
-        // Reset import form
         setShowImportWallet(false);
-        setImportPrivateKey("");
         setImportUsername("");
-        setShowImportKey(false);
         // Refresh the stored wallets list
         const wallets = getStoredWallets();
         setStoredWallets(wallets);
@@ -974,6 +987,9 @@ export default function WalletApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to import wallet");
     } finally {
+      // Wipe the plaintext key from the form even when the import fails
+      setImportPrivateKey("");
+      setShowImportKey(false);
       setImporting(false);
     }
   };
@@ -1107,25 +1123,31 @@ export default function WalletApp() {
 
     setLoading(true);
     try {
-      const result = await handleSessionRequest(
-        sessionRequest,
-        wallet.privateKey,
-        approve
-      );
-      if (result && approve) {
+      if (approve) {
+        // Fresh passkey ceremony per request inside the signer boundary -
+        // the key never reaches this component
+        await approveWalletConnectRequest(wallet, sessionRequest);
         setSuccess("Request approved!");
         setTimeout(() => setSuccess(null), 3000);
+        fetchBalance(); // Refresh balance after transaction
+      } else {
+        await rejectSessionRequest(sessionRequest);
       }
-      fetchBalance(); // Refresh balance after transaction
+      setSessionRequest(null);
     } catch (err) {
+      if (err instanceof UserCancelledError) {
+        // Prompt dismissed before anything was signed or sent to the dApp -
+        // keep the modal open so the user can retry or explicitly reject
+        return;
+      }
       setError(
         err instanceof Error ? err.message : "Failed to process request"
       );
-    } finally {
-      // Always dismiss the modal, even if responding to the dApp failed
-      // (e.g. the WalletConnect session was already deleted). Otherwise the
-      // user gets stuck on a request they can neither approve nor reject.
+      // Dismiss the modal even if responding to the dApp failed (e.g. the
+      // session was already deleted). Otherwise the user gets stuck on a
+      // request they can neither approve nor reject.
       setSessionRequest(null);
+    } finally {
       setLoading(false);
     }
   };
@@ -1151,52 +1173,49 @@ export default function WalletApp() {
   };
 
   const copyPrivateKey = async () => {
-    if (!wallet) return;
-    await navigator.clipboard.writeText(wallet.privateKey);
+    if (!revealedKey) return;
+    await navigator.clipboard.writeText(revealedKey);
     setSuccess("Private key copied to clipboard!");
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Handle revealing private key with passkey authentication
+  // Wipe the transiently revealed private key from state
+  const hideRevealedKey = useCallback(() => {
+    if (revealTimeoutRef.current) {
+      clearTimeout(revealTimeoutRef.current);
+      revealTimeoutRef.current = null;
+    }
+    setRevealedKey(null);
+    setShowPrivateKey(false);
+  }, []);
+
+  // Reveal the private key: one fresh passkey ceremony re-derives/decrypts it
+  // via the signer boundary. It is held only in short-lived revealedKey state
+  // and auto-hidden after 30 seconds.
   const handleRevealPrivateKey = async () => {
     if (!wallet) return;
 
     // If already shown, just hide it (no auth needed)
     if (showPrivateKey) {
-      setShowPrivateKey(false);
+      hideRevealedKey();
       return;
     }
 
-    // Require passkey authentication before revealing
     setIsAuthenticatingForExport(true);
     setError(null);
 
     try {
-      // Create a StoredWallet object from the current wallet for authentication
-      const storedWallet: StoredWallet = {
-        credentialId: wallet.credential.credentialId,
-        credentialIdHex: wallet.credential.credentialIdHex,
-        username: wallet.credential.username || "Wallet",
-        address: wallet.address,
-        createdAt: wallet.credential.createdAt,
-        isImported: wallet.credential.isImported,
-      };
-
-      // Authenticate - for imported wallets use unlockImportedWallet, for others use authenticateWithWallet
-      let authResult;
-      if (storedWallet.isImported) {
-        authResult = await unlockImportedWallet(storedWallet);
-      } else {
-        authResult = await authenticateWithWallet(storedWallet);
-      }
-
-      if (authResult) {
-        // Authentication successful, reveal the private key
-        setShowPrivateKey(true);
-      } else {
-        setError("Authentication failed. Please try again.");
-      }
+      const key = await exportPrivateKey(wallet);
+      setRevealedKey(key);
+      setShowPrivateKey(true);
+      if (revealTimeoutRef.current) clearTimeout(revealTimeoutRef.current);
+      revealTimeoutRef.current = setTimeout(() => {
+        setRevealedKey(null);
+        setShowPrivateKey(false);
+        revealTimeoutRef.current = null;
+      }, 30000);
     } catch (err) {
+      if (err instanceof UserCancelledError) return;
       console.error("Passkey authentication failed:", err);
       setError(
         err instanceof Error ? err.message : "Authentication cancelled or failed."
@@ -1923,7 +1942,7 @@ export default function WalletApp() {
                 )}
                 <div className="flex flex-col items-start">
                   <span className="font-medium text-base flex items-center gap-1">
-                    {walletEnsName || wallet.credential.username || "Wallet"}
+                    {walletEnsName || wallet.username || "Wallet"}
                     <svg
                       className="w-3.5 h-3.5 text-muted"
                       fill="none"
@@ -3074,12 +3093,12 @@ export default function WalletApp() {
                       <PunkAvatar address={wallet.address} size={40} />
                     )}
                     <span className="font-medium">
-                      {wallet.credential.username || "Wallet"}
+                      {wallet.username || "Wallet"}
                     </span>
                   </div>
                   <button
                     onClick={() => {
-                      setEditedName(wallet.credential.username || "");
+                      setEditedName(wallet.username || "");
                       setIsEditingName(true);
                     }}
                     className="p-2 rounded-sm hover:bg-card-border transition-colors"
@@ -3283,7 +3302,7 @@ export default function WalletApp() {
                     )}
                     <div>
                       <div className="font-medium">
-                        {wallet.credential.username || "Wallet"}
+                        {wallet.username || "Wallet"}
                       </div>
                       <div className="text-sm text-muted font-mono">
                         {formatAddress(wallet.address)}
@@ -3392,8 +3411,8 @@ export default function WalletApp() {
                             overflowWrap: "anywhere",
                           }}
                         >
-                          {showPrivateKey
-                            ? wallet.privateKey
+                          {showPrivateKey && revealedKey
+                            ? revealedKey
                             : "••••••••••••••••••••••••••••••••"}
                         </code>
                       </div>
@@ -3467,7 +3486,7 @@ export default function WalletApp() {
                   {/* Back to safety */}
                   <button
                     onClick={() => {
-                      setShowPrivateKey(false);
+                      hideRevealedKey();
                       setExportConfirmed(false);
                     }}
                     className="w-full py-3 px-6 rounded-sm bg-card-border hover:bg-muted/20 transition-all duration-150 font-medium"
@@ -3535,7 +3554,7 @@ export default function WalletApp() {
                       )}
                       <div>
                         <div className="font-medium text-sm">
-                          {wallet.credential.username || "Wallet"}
+                          {wallet.username || "Wallet"}
                         </div>
                         <div className="text-xs text-muted font-mono">
                           {formatAddress(wallet.address)}
@@ -4368,7 +4387,7 @@ export default function WalletApp() {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">
-                        {wallet.credential.username || "Wallet"}
+                        {wallet.username || "Wallet"}
                       </div>
                       <div className="font-mono text-sm text-muted">
                         {formatAddress(wallet.address)}
@@ -4438,16 +4457,8 @@ export default function WalletApp() {
                                   setSwitchingWalletIndex(i);
                                   setError(null);
                                   try {
-                                    let walletData: PasskeyWallet | null = null;
-                                    if (w.isImported) {
-                                      walletData = await unlockImportedWallet(
-                                        w
-                                      );
-                                    } else {
-                                      walletData = await authenticateWithWallet(
-                                        w
-                                      );
-                                    }
+                                    const walletData =
+                                      await unlockIdentityFor(w);
                                     if (walletData) {
                                       setWallet(walletData);
                                       setShowAccountSwitcher(false);

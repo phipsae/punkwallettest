@@ -2,7 +2,7 @@ import { Core } from "@walletconnect/core";
 import { WalletKit, WalletKitTypes } from "@reown/walletkit";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
 import { formatEther, type Hex, type Chain } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import type { PrivateKeyAccount } from "viem/accounts";
 import { getAllNetworks, getAllNetworkIds, getCustomNetworks } from "./wallet";
 
 // WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
@@ -366,30 +366,36 @@ export async function updateSessionsAccount(newAddress: string): Promise<void> {
 }
 
 // Handle a session request (sign transaction, message, etc.)
-export async function handleSessionRequest(
+// Reject a session request. Key-free path - callable without any unlock.
+export async function rejectSessionRequest(
+  request: SessionRequest
+): Promise<void> {
+  const wk = await initWalletConnect();
+  if (!wk) throw new Error("WalletConnect not initialized");
+  await wk.respondSessionRequest({
+    topic: request.topic,
+    response: {
+      id: request.id,
+      jsonrpc: "2.0",
+      error: getSdkError("USER_REJECTED"),
+    },
+  });
+}
+
+// Sign/execute an approved session request and respond to the dApp. Takes a
+// viem account, never a raw key - only src/lib/signer.ts may call this, from
+// inside its key scope. Signing failures are responded to the dApp AND
+// rethrown so the UI shows the real reason.
+export async function executeSessionRequest(
   request: SessionRequest,
-  privateKey: Hex,
-  approve: boolean
-): Promise<string | null> {
+  account: PrivateKeyAccount
+): Promise<string> {
   const wk = await initWalletConnect();
   if (!wk) throw new Error("WalletConnect not initialized");
   const { id, topic, params } = request;
   const { method, params: requestParams } = params.request;
 
-  if (!approve) {
-    await wk.respondSessionRequest({
-      topic,
-      response: {
-        id,
-        jsonrpc: "2.0",
-        error: getSdkError("USER_REJECTED"),
-      },
-    });
-    return null;
-  }
-
   try {
-    const account = privateKeyToAccount(privateKey);
     let result: string;
 
     switch (method) {
@@ -436,10 +442,7 @@ export async function handleSessionRequest(
         const networkId = chainIdToNetworkId[chainId] || "base";
         const chain = supportedChains[`eip155:${chainId}`] || supportedChains["eip155:8453"];
 
-        const walletClient = createWalletClientForNetwork(
-          privateKey,
-          networkId
-        );
+        const walletClient = createWalletClientForNetwork(account, networkId);
 
         const hash = await walletClient.sendTransaction({
           account,
@@ -470,18 +473,24 @@ export async function handleSessionRequest(
     return result;
   } catch (error) {
     console.error("Error handling request:", error);
-    await wk.respondSessionRequest({
-      topic,
-      response: {
-        id,
-        jsonrpc: "2.0",
-        error: {
-          code: 5000,
-          message: error instanceof Error ? error.message : "Unknown error",
+    // Best-effort error response to the dApp, then rethrow so the wallet UI
+    // shows the real failure instead of a silent null.
+    try {
+      await wk.respondSessionRequest({
+        topic,
+        response: {
+          id,
+          jsonrpc: "2.0",
+          error: {
+            code: 5000,
+            message: error instanceof Error ? error.message : "Unknown error",
+          },
         },
-      },
-    });
-    return null;
+      });
+    } catch (respondError) {
+      console.error("Failed to respond with error to dApp:", respondError);
+    }
+    throw error;
   }
 }
 
