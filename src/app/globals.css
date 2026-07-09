@@ -13,6 +13,9 @@
   --card-border: #262626;
   --input-bg: #0a0a0a;
   --punk-cyan: #4ecdc4;
+  --punk-purple: #a78bfa;
+  --punk-green: #22c55e;
+  --punk-yellow: #eab308;
   --muted: #737373;
 }
 
@@ -29,6 +32,9 @@
   --color-card-border: var(--card-border);
   --color-input-bg: var(--input-bg);
   --color-punk-cyan: var(--punk-cyan);
+  --color-punk-purple: var(--punk-purple);
+  --color-punk-green: var(--punk-green);
+  --color-punk-yellow: var(--punk-yellow);
   --color-muted: var(--muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

@@ -37,6 +37,14 @@ import {
   setAcknowledgedPrivacyRisk,
   setProtocolEnabled,
 } from "@/lib/kohakuSession";
+import {
+  isVerifiedModeEnabled,
+  setVerifiedModeEnabled,
+  isVerifiedModeConfigured,
+  getVerifiedStatus,
+  onVerifiedStatus,
+  type VerifiedStatus,
+} from "@/lib/verifiedMode";
 
 type PanelView =
   | "overview"
@@ -86,9 +94,14 @@ export default function PrivacyPanel({
   const [sendAmount, setSendAmount] = useState("");
   const [sendTo0zk, setSendTo0zk] = useState("");
   const [activeRow, setActiveRow] = useState<PrivateBalanceRow | null>(null);
+  const [verifiedStatus, setVerifiedStatusState] = useState<VerifiedStatus>(
+    getVerifiedStatus()
+  );
 
   const enabled = isPrivacyEnabled(wallet.credentialId);
   const unlocked = isKohakuUnlocked(wallet.credentialId);
+
+  useEffect(() => onVerifiedStatus(setVerifiedStatusState), []);
 
   const refreshBalances = useCallback(async () => {
     if (!isPrivacyReady(wallet.credentialId, network)) return;
@@ -667,6 +680,47 @@ export default function PrivacyPanel({
           ))
         )}
       </div>
+
+      {isVerifiedModeConfigured() && network === "mainnet" && (
+        <div className="flex items-center justify-between border-t border-card-border pt-3">
+          <div className="text-xs">
+            <span className="font-medium">⚡ Verified mode</span>
+            <span
+              className={`ml-2 ${
+                verifiedStatus === "synced"
+                  ? "text-punk-green"
+                  : verifiedStatus === "syncing"
+                    ? "text-muted"
+                    : verifiedStatus === "unavailable"
+                      ? "text-punk-yellow"
+                      : "text-muted"
+              }`}
+            >
+              {verifiedStatus === "synced"
+                ? "synced ✓"
+                : verifiedStatus === "syncing"
+                  ? "syncing…"
+                  : verifiedStatus === "unavailable"
+                    ? "unavailable, using RPC"
+                    : "off"}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setVerifiedModeEnabled(!isVerifiedModeEnabled());
+              // Re-init picks up the new provider on next unlock/refresh
+              onSuccess(
+                isVerifiedModeEnabled()
+                  ? "Verified mode on. Reopen the wallet to apply."
+                  : "Verified mode off."
+              );
+            }}
+            className="text-xs text-accent hover:text-accent-light"
+          >
+            {isVerifiedModeEnabled() ? "Turn off" : "Turn on"}
+          </button>
+        </div>
+      )}
 
       <p className="text-[11px] text-muted">
         Unaudited alpha software. Only shield amounts you can afford to lose.

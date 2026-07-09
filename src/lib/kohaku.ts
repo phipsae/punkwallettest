@@ -36,6 +36,7 @@ import {
   checkKohakuIdbAvailable,
   createHostStorage,
 } from "./kohakuStorage";
+import { createVerifiedProvider } from "./verifiedMode";
 
 export type ProtocolId = KohakuProtocolId;
 
@@ -175,7 +176,8 @@ async function ensureRailgunWasm(logLevel?: string): Promise<
 async function initTornado(
   credentialId: string,
   networkId: string,
-  chainId: number
+  chainId: number,
+  verifiedProvider?: unknown | null
 ): Promise<{ plugin: TornadoInstance; broadcaster: TornadoBroadcaster }> {
   const tc = await import("@kohaku-eth/tornado-cash");
   const protocolConfig =
@@ -183,7 +185,7 @@ async function initTornado(
   if (!protocolConfig) {
     throw new Error(`Tornado Cash is not configured for chain ${chainId}`);
   }
-  const host = buildHost(credentialId, networkId, "tornado");
+  const host = buildHost(credentialId, networkId, "tornado", verifiedProvider);
   // No stateManagerWorkerUrl: let our worker-loader shim create the worker via
   // new Worker(new URL(...)) so webpack bundles the full worker graph.
   const plugin = tc.createTCPlugin(host, {
@@ -273,7 +275,13 @@ export function isPrivacyReady(credentialId: string, networkId: string): boolean
   );
 }
 
-function buildHost(credentialId: string, networkId: string, protocol: ProtocolId): Host {
+function buildHost(
+  credentialId: string,
+  networkId: string,
+  protocol: ProtocolId,
+  // A verified (light-client) provider to use instead of the plain viem one
+  verifiedProvider?: unknown | null
+): Host {
   const publicClient = createPublicClientForNetwork(networkId);
   return {
     network: {
@@ -283,7 +291,9 @@ function buildHost(credentialId: string, networkId: string, protocol: ProtocolId
     keystore: {
       deriveAt: (path: string) => deriveAtFromSession(protocol, path),
     },
-    provider: viemProviderAdapter(publicClient),
+    provider:
+      (verifiedProvider as Host["provider"] | null) ??
+      viemProviderAdapter(publicClient),
   };
 }
 
@@ -340,10 +350,14 @@ export async function initPrivacy(
       // Tornado worker not loading) must not take down the others.
       const failures: string[] = [];
 
+      // Verified mode (light client) provider, shared by all protocols. Null
+      // when off/unconfigured/non-mainnet or on failure -> plain RPC.
+      const verifiedProvider = await createVerifiedProvider(networkId, chainId);
+
       if (enabled.includes("railgun")) {
         try {
           const railgunModule = await ensureRailgunWasm();
-          const host = buildHost(credentialId, networkId, "railgun");
+          const host = buildHost(credentialId, networkId, "railgun", verifiedProvider);
           next.railgun = await railgunModule.createRailgunPlugin(host, {
             keyIndex: 0,
             poi: true,
@@ -362,7 +376,7 @@ export async function initPrivacy(
           const entry =
             PrivacyPoolsV1_0xBow[chainId as keyof typeof PrivacyPoolsV1_0xBow];
           if (entry) {
-            const host = buildHost(credentialId, networkId, "privacy-pools");
+            const host = buildHost(credentialId, networkId, "privacy-pools", verifiedProvider);
             next.privacyPools = createPPv1Plugin(host, {
               accountIndex: 0,
               entrypoint: {
@@ -393,7 +407,12 @@ export async function initPrivacy(
 
       if (enabled.includes("tornado") && isTornadoEnabledInBuild()) {
         try {
-          next.tornado = await initTornado(credentialId, networkId, chainId);
+          next.tornado = await initTornado(
+            credentialId,
+            networkId,
+            chainId,
+            verifiedProvider
+          );
         } catch (e) {
           console.error("Tornado Cash init failed", e);
           failures.push("Tornado Cash");

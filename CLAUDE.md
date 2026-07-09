@@ -24,7 +24,9 @@ Optional (Kohaku privacy features). All `NEXT_PUBLIC_` values are baked into the
 - `NEXT_PUBLIC_ENABLE_TESTNETS=true` adds Sepolia to the network list (dev testing of the privacy plugins)
 - `NEXT_PUBLIC_ENABLE_TORNADO=false` removes the Tornado Cash plugin from the build entirely
 - `NEXT_PUBLIC_TORNADO_IOS=true` shows Tornado inside the Capacitor/native build (default hidden, App Store review risk)
-- `NEXT_PUBLIC_PIMLICO_API_KEY` 4337 bundler key for private Railgun transfers (Phase 3)
+- `NEXT_PUBLIC_PIMLICO_API_KEY` 4337 bundler key for private Railgun transfers (0zk sends) and Tornado paymaster withdrawals
+- `NEXT_PUBLIC_PRIVACY_POOLS_RELAYER_URL` 0xbow relayer for Privacy Pools withdrawals (deposits/balance/ragequit work without it)
+- `NEXT_PUBLIC_BEACON_API_URL` Ethereum consensus/beacon endpoint enabling light-client "verified mode" (mainnet only)
 
 ## Architecture
 

@@ -14,6 +14,7 @@
     "@capacitor/cli": "^8.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/ios": "^8.0.0",
+    "@corpus-core/colibri-stateless": "1.1.30",
     "@kohaku-eth/plugins": "0.0.1-alpha.11",
     "@kohaku-eth/privacy-pools": "0.0.2-alpha.14",
     "@kohaku-eth/provider": "0.1.0-alpha.8",
