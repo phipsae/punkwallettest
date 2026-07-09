@@ -10,7 +10,11 @@ import { formatUnits, parseUnits } from "viem";
 import { QRCodeSVG } from "qrcode.react";
 import type { PublicWalletInfo } from "@/lib/passkey";
 import { UserCancelledError } from "@/lib/passkey";
-import { enableKohakuPrivacy, signAndSendBatch } from "@/lib/signer";
+import {
+  enableKohakuPrivacy,
+  signAndSendBatch,
+  broadcastPrivateTransfer,
+} from "@/lib/signer";
 import { isValidAddress, formatAddress } from "@/lib/wallet";
 import {
   initPrivacy,
@@ -18,6 +22,8 @@ import {
   getRailgunAddress,
   prepareShield,
   prepareUnshield,
+  prepareRailgunPrivateTransfer,
+  isRailgunPrivateSendAvailable,
   isPrivacyReady,
   getPrivacyInitError,
   getAvailableProtocols,
@@ -32,7 +38,12 @@ import {
   setProtocolEnabled,
 } from "@/lib/kohakuSession";
 
-type PanelView = "overview" | "shield" | "unshield" | "receive";
+type PanelView =
+  | "overview"
+  | "shield"
+  | "unshield"
+  | "receive"
+  | "privateSend";
 
 const PROTOCOL_LABELS: Record<ProtocolId, string> = {
   railgun: "Railgun",
@@ -72,6 +83,8 @@ export default function PrivacyPanel({
   const [shieldProtocol, setShieldProtocol] = useState<ProtocolId>("railgun");
   const [unshieldAmount, setUnshieldAmount] = useState("");
   const [unshieldTo, setUnshieldTo] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [sendTo0zk, setSendTo0zk] = useState("");
   const [activeRow, setActiveRow] = useState<PrivateBalanceRow | null>(null);
 
   const enabled = isPrivacyEnabled(wallet.credentialId);
@@ -269,6 +282,56 @@ export default function PrivacyPanel({
     }
   }, [activeRow, unshieldAmount, unshieldTo, wallet, network, onError, onSuccess, refreshBalances]);
 
+  const handlePrivateSend = useCallback(async () => {
+    const row = activeRow;
+    if (!row || !row.contract) {
+      onError("Private send requires a shielded token balance.");
+      return;
+    }
+    if (!sendTo0zk.startsWith("0zk")) {
+      onError("Enter a valid Railgun (0zk) recipient address.");
+      return;
+    }
+    let amount: bigint;
+    try {
+      amount = parseUnits(sendAmount, row.decimals);
+    } catch {
+      onError("Invalid amount.");
+      return;
+    }
+    if (amount <= BigInt(0) || amount > row.spendable) {
+      onError("Amount exceeds your spendable private balance.");
+      return;
+    }
+    setBusy(true);
+    setProving(true);
+    try {
+      await prepareRailgunPrivateTransfer({
+        to0zk: sendTo0zk.trim(),
+        contract: row.contract,
+        amount,
+      });
+      setProving(false);
+      // Relayed via bundler; the passkey prompt authorizes the fee UserOp
+      await broadcastPrivateTransfer({
+        credentialId: wallet.credentialId,
+        address: wallet.address,
+        isImported: wallet.isImported,
+      });
+      onSuccess("Private transfer sent.");
+      setSendAmount("");
+      setSendTo0zk("");
+      setPanelView("overview");
+      refreshBalances();
+    } catch (err) {
+      if (err instanceof UserCancelledError) return;
+      onError(err instanceof Error ? err.message : "Private send failed.");
+    } finally {
+      setBusy(false);
+      setProving(false);
+    }
+  }, [activeRow, sendAmount, sendTo0zk, wallet, onError, onSuccess, refreshBalances]);
+
   const openReceive = useCallback(async () => {
     setPanelView("receive");
     if (!zkAddress) {
@@ -379,6 +442,85 @@ export default function PrivacyPanel({
     );
   }
 
+  if (panelView === "privateSend") {
+    const tokenRows = balances.filter(
+      (r) => r.protocol === "railgun" && r.contract && r.spendable > BigInt(0)
+    );
+    return (
+      <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Private send (Railgun)</h3>
+          <button
+            onClick={() => setPanelView("overview")}
+            className="text-xs text-accent"
+          >
+            Back
+          </button>
+        </div>
+        {tokenRows.length === 0 ? (
+          <p className="text-sm text-muted">
+            You need a shielded ERC-20 token balance to send privately. Native
+            ETH private transfers are not supported in this version.
+          </p>
+        ) : (
+          <>
+            <select
+              value={
+                activeRow
+                  ? `${activeRow.protocol}-${activeRow.contract ?? "native"}`
+                  : ""
+              }
+              onChange={(e) =>
+                setActiveRow(
+                  tokenRows.find(
+                    (r) =>
+                      `${r.protocol}-${r.contract ?? "native"}` === e.target.value
+                  ) ?? null
+                )
+              }
+              className="w-full p-3 rounded-sm bg-input-bg border border-card-border"
+            >
+              {tokenRows.map((r) => (
+                <option
+                  key={`${r.protocol}-${r.contract ?? "native"}`}
+                  value={`${r.protocol}-${r.contract ?? "native"}`}
+                >
+                  {r.symbol} ({formatUnits(r.spendable, r.decimals)})
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={sendTo0zk}
+              onChange={(e) => setSendTo0zk(e.target.value)}
+              placeholder="Recipient 0zk address"
+              className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={sendAmount}
+              onChange={(e) => setSendAmount(e.target.value)}
+              placeholder="Amount"
+              className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono"
+            />
+            <p className="text-[11px] text-muted">
+              Sent privately through a relayer, your public address never
+              appears on-chain.
+            </p>
+            <button
+              onClick={handlePrivateSend}
+              disabled={busy || !sendAmount || !sendTo0zk}
+              className="w-full py-3 rounded-sm bg-punk-purple text-white font-medium disabled:opacity-50"
+            >
+              {busy ? "Sending…" : "Send privately"}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (panelView === "receive") {
     return (
       <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
@@ -456,6 +598,25 @@ export default function PrivacyPanel({
           Unshield ↑
         </button>
       </div>
+      {isRailgunPrivateSendAvailable() && (
+        <button
+          onClick={() => {
+            setActiveRow(
+              balances.find(
+                (r) =>
+                  r.protocol === "railgun" &&
+                  r.contract &&
+                  r.spendable > BigInt(0)
+              ) ?? null
+            );
+            setPanelView("privateSend");
+          }}
+          disabled={!ready}
+          className="w-full py-2.5 px-4 rounded-sm bg-punk-purple/80 hover:bg-punk-purple text-white text-sm font-medium disabled:opacity-50"
+        >
+          Private send (0zk) →
+        </button>
+      )}
       <button
         onClick={openReceive}
         disabled={!ready}

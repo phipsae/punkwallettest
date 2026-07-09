@@ -39,6 +39,17 @@ import {
 
 export type ProtocolId = KohakuProtocolId;
 
+// Pimlico 4337 bundler for private Railgun transfers (0zk -> 0zk). Without it,
+// private send is unavailable (self-broadcasting a transfer would link the
+// EOA, defeating the purpose).
+const PIMLICO_API_KEY = process.env.NEXT_PUBLIC_PIMLICO_API_KEY || "";
+function pimlicoUrl(chainId: number): string {
+  return `https://api.pimlico.io/v2/${chainId}/rpc?apikey=${PIMLICO_API_KEY}`;
+}
+export function isRailgunPrivateSendAvailable(): boolean {
+  return Boolean(PIMLICO_API_KEY) && state?.railgun != null;
+}
+
 // Kohaku's Railgun crate ships chain configs for mainnet and Sepolia only.
 // Privacy Pools v1 and the Tornado configs cover the same two chains.
 export const PRIVACY_SUPPORTED_CHAIN_IDS = [1, 11155111];
@@ -650,6 +661,137 @@ export async function prepareUnshield(
     selfBroadcast: { txs, unwrapTx },
     feeNote: `Railgun charges a ${feePct}% unshield fee (added on top so the recipient gets the exact amount).`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Railgun private transfer (0zk -> 0zk), relayed via a 4337 bundler so the
+// EOA never appears. Proving (keyless) and broadcast (needs the EOA key to
+// authorize the fee UserOperation) are split so the passkey prompt comes
+// after the ~1 min proof, not before it.
+//
+// Minimal replica of the SDK's internal (unexported) EthereumProviderAdapter,
+// needed to build the SimpleSmartAccount.
+class Eip1193Adapter {
+  constructor(
+    private provider: {
+      getChainId(): Promise<bigint>;
+      getBlockNumber(): Promise<bigint>;
+      request(args: { method: string; params: unknown[] }): Promise<unknown>;
+      call(args: { to: string; input: string }): Promise<string | undefined>;
+      estimateGas(args: { to: string; from?: string; input: string }): Promise<bigint>;
+      getGasPrice(): Promise<bigint>;
+      getTransactionCount(address: string, block?: number): Promise<number | bigint>;
+    }
+  ) {}
+  getChainId() {
+    return this.provider.getChainId();
+  }
+  getBlockNumber() {
+    return this.provider.getBlockNumber();
+  }
+  async getLogs(
+    address: `0x${string}`,
+    eventSignature: `0x${string}` | undefined,
+    fromBlock: number | undefined,
+    toBlock: number | undefined
+  ) {
+    const filter: Record<string, unknown> = { address };
+    if (fromBlock !== undefined) filter.fromBlock = `0x${fromBlock.toString(16)}`;
+    if (toBlock !== undefined) filter.toBlock = `0x${toBlock.toString(16)}`;
+    if (eventSignature) filter.topics = [eventSignature];
+    const logs = (await this.provider.request({
+      method: "eth_getLogs",
+      params: [filter],
+    })) as Array<Record<string, unknown>>;
+    return logs.map((log) => ({
+      blockNumber:
+        log.blockNumber != null ? Number(BigInt(log.blockNumber as string)) : null,
+      blockTimestamp: null,
+      transactionHash: log.transactionHash as string,
+      address: (log.address as string) ?? address,
+      topics: (log.topics as string[]) ?? [],
+      data: (log.data as string) ?? "0x",
+    }));
+  }
+  async ethCall(to: `0x${string}`, data: `0x${string}`) {
+    return (await this.provider.call({ to, input: data })) ?? "0x";
+  }
+  estimateGas(to: `0x${string}`, from: `0x${string}` | undefined, data: `0x${string}`) {
+    return this.provider.estimateGas({ to, from, input: data });
+  }
+  getGasPrice() {
+    return this.provider.getGasPrice();
+  }
+  async getTransactionCount(address: `0x${string}`, block: number | undefined) {
+    return BigInt(await this.provider.getTransactionCount(address, block));
+  }
+}
+
+let pendingTransferOp: unknown = null;
+
+// Prove a private transfer. No key needed. Stores the proved op for broadcast.
+export async function prepareRailgunPrivateTransfer(args: {
+  to0zk: string;
+  contract: `0x${string}` | null;
+  amount: bigint;
+}): Promise<void> {
+  const s = requireState();
+  if (!s.railgun) throw new Error("Railgun is not available on this network.");
+  if (args.contract === null) {
+    throw new Error(
+      "Private transfers require an ERC-20 token in this version (not native ETH)."
+    );
+  }
+  pendingTransferOp = await s.railgun.prepareTransfer(
+    { asset: { __type: "erc20", contract: args.contract }, amount: args.amount },
+    args.to0zk as Parameters<typeof s.railgun.prepareTransfer>[1]
+  );
+}
+
+// Broadcast the proved transfer via the 4337 bundler. The EOA private key
+// authorizes the fee UserOperation; it is used to build a WASM Signer that is
+// freed, and detached from the plugin, immediately after. Called ONLY from
+// signer.ts inside a passkey ceremony.
+export async function broadcastRailgunPrivateTransfer(
+  ownerAddress: `0x${string}`,
+  privateKey: `0x${string}`
+): Promise<void> {
+  const s = requireState();
+  if (!s.railgun) throw new Error("Railgun is not available.");
+  if (!PIMLICO_API_KEY) throw new Error("No bundler configured for private send.");
+  if (!pendingTransferOp) throw new Error("No prepared transfer to broadcast.");
+
+  const railgunModule = await import("@kohaku-eth/railgun");
+  const publicClient = createPublicClientForNetwork(s.networkId);
+  const eip1193 = new Eip1193Adapter(
+    viemProviderAdapter(publicClient) as unknown as ConstructorParameters<
+      typeof Eip1193Adapter
+    >[0]
+  );
+  const bundler = railgunModule.Bundler.pimlico(pimlicoUrl(s.chainId));
+  const smartAccount = new railgunModule.SimpleSmartAccount(
+    ownerAddress,
+    BigInt(s.chainId),
+    eip1193 as unknown as ConstructorParameters<
+      typeof railgunModule.SimpleSmartAccount
+    >[2]
+  );
+  const signer = railgunModule.Signer.privateKey(privateKey);
+  const plugin = s.railgun as unknown as {
+    setBundler(b: unknown): void;
+    setSmartAccount(sa: unknown, signer: unknown): void;
+    broadcast(op: unknown): Promise<void>;
+  };
+  try {
+    plugin.setBundler(bundler);
+    plugin.setSmartAccount(smartAccount, signer);
+    await plugin.broadcast(pendingTransferOp);
+  } finally {
+    // Detach and free the key-bearing signer immediately
+    (signer as unknown as { free?: () => void }).free?.();
+    plugin.setBundler(undefined);
+    pendingTransferOp = null;
+  }
 }
 
 // ---------------------------------------------------------------------------

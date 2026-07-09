@@ -23,6 +23,7 @@ import { sendETH, sendRawTx, type TransactionResult } from "./wallet";
 import { sendToken, type Token } from "./tokens";
 import { executeSessionRequest, type SessionRequest } from "./walletconnect";
 import { setKohakuSession, isPrivacyEnabled } from "./kohakuSession";
+import { broadcastRailgunPrivateTransfer } from "./kohaku";
 
 // The minimum a signer call needs to know about the wallet. address is used
 // as an integrity check: the ceremony-derived key must match it or the call
@@ -162,6 +163,18 @@ export async function signAndSendBatch(args: {
     hashes.push(result.hash);
   }
   return { hashes, success: true };
+}
+
+// Broadcast a proved Railgun private transfer through the 4337 bundler. The
+// EOA key authorizes the fee UserOperation inside this ceremony and is freed
+// immediately by kohaku.ts. The transfer must already be proved
+// (prepareRailgunPrivateTransfer). Fresh passkey prompt.
+export async function broadcastPrivateTransfer(
+  wallet: SignerTarget
+): Promise<void> {
+  return unsafeWithSessionKey(wallet, async (privateKey, address) => {
+    await broadcastRailgunPrivateTransfer(address, privateKey);
+  });
 }
 
 // THE ONLY FUNCTION IN THE APP THAT RETURNS KEY MATERIAL. Used exclusively by
