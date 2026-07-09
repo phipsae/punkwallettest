@@ -16,12 +16,11 @@ import type { Host } from "@kohaku-eth/plugins";
 // `new Function` at module-eval time. Importing it statically would (a) load
 // that whole stack on every page view and (b) trip the CSP at startup and
 // brick the wallet. So we keep only the types here and import the values
-// lazily inside initPrivacy. Same rationale as the Railgun/Tornado dynamic
-// imports.
+// lazily inside initPrivacy. Same rationale as the Railgun dynamic import.
 import type { PPv1Instance, PPv1Broadcaster } from "@kohaku-eth/privacy-pools";
 
-// Native-asset sentinel used by Privacy Pools and Tornado (mirrors their
-// exported E_ADDRESS; inlined to avoid a static import of the PP module).
+// Native-asset sentinel used by Privacy Pools (mirrors its exported
+// E_ADDRESS; inlined to avoid a static import of the PP module).
 const E_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 import {
   createPublicClientForNetwork,
@@ -55,29 +54,11 @@ export function isRailgunPrivateSendAvailable(): boolean {
 }
 
 // Kohaku's Railgun crate ships chain configs for mainnet and Sepolia only.
-// Privacy Pools v1 and the Tornado configs cover the same two chains.
+// Privacy Pools v1 covers the same two chains.
 export const PRIVACY_SUPPORTED_CHAIN_IDS = [1, 11155111];
 
-// Tornado ships in the web build by default and stays out of the iOS build
-// unless explicitly opted in (App Store review risk, OFAC history).
-function isTornadoEnabledInBuild(): boolean {
-  if (process.env.NEXT_PUBLIC_ENABLE_TORNADO === "false") return false;
-  if (typeof window !== "undefined") {
-    const isNative = Boolean(
-      (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })
-        .Capacitor?.isNativePlatform?.()
-    );
-    if (isNative && process.env.NEXT_PUBLIC_TORNADO_IOS !== "true") {
-      return false;
-    }
-  }
-  return true;
-}
-
 export function getAvailableProtocols(): ProtocolId[] {
-  const protocols: ProtocolId[] = ["railgun", "privacy-pools"];
-  if (isTornadoEnabledInBuild()) protocols.push("tornado");
-  return protocols;
+  return ["railgun", "privacy-pools"];
 }
 
 export function getChainIdForNetwork(networkId: string): number | null {
@@ -120,8 +101,8 @@ export type PreparedShield = {
 // Unshielding takes one of two shapes depending on the protocol:
 // - self-broadcast (Railgun): the wallet EOA signs and submits the proved
 //   transactions itself. Links the EOA on-chain, fine for withdraw-to-self.
-// - relayed (Privacy Pools, Tornado): a relayer/bundler submits, so no EOA
-//   signature and no EOA link. The registry owns the network call.
+// - relayed (Privacy Pools): a relayer submits, so no EOA signature and no
+//   EOA link. The registry owns the network call.
 export type PreparedUnshield = {
   protocol: ProtocolId;
   feeNote?: string;
@@ -172,68 +153,12 @@ async function ensureRailgunWasm(logLevel?: string): Promise<
   return railgun;
 }
 
-// Tornado Cash init. Dynamic import keeps its comlink Web Worker + circuit
-// machinery out of every build and lets a load failure be caught at runtime
-// (isolated per-protocol) rather than breaking the whole bundle. The worker
-// runs the fixed-denomination note scanning and Groth16 proving off-thread.
-async function initTornado(
-  credentialId: string,
-  networkId: string,
-  chainId: number,
-  verifiedProvider?: unknown | null
-): Promise<{ plugin: TornadoInstance; broadcaster: TornadoBroadcaster }> {
-  const tc = await import("@kohaku-eth/tornado-cash");
-  const protocolConfig =
-    tc.TornadoCashConfigs[chainId as keyof typeof tc.TornadoCashConfigs];
-  if (!protocolConfig) {
-    throw new Error(`Tornado Cash is not configured for chain ${chainId}`);
-  }
-  const host = buildHost(credentialId, networkId, "tornado", verifiedProvider);
-  // No stateManagerWorkerUrl: let our worker-loader shim create the worker via
-  // new Worker(new URL(...)) so webpack bundles the full worker graph.
-  const plugin = tc.createTCPlugin(host, {
-    accountIndex: 0,
-    protocolConfig: protocolConfig as unknown as Parameters<
-      typeof tc.createTCPlugin
-    >[1]["protocolConfig"],
-    paymasterConfig: tc.TornadoPaymasterConfigs,
-  }) as unknown as TornadoInstance;
-  const broadcaster = tc.createTCBroadcaster(host, {
-    paymasterConfig: tc.TornadoPaymasterConfigs,
-  }) as unknown as TornadoBroadcaster;
-  return { plugin, broadcaster };
-}
-
 // ---------------------------------------------------------------------------
 // Registry state
 
 type RailgunPluginInstance = Awaited<
   ReturnType<typeof import("@kohaku-eth/railgun").createRailgunPlugin>
 >;
-
-// Structural shape of the Tornado plugin we use (loaded via dynamic import,
-// so we avoid a static type dependency that would pull it into every build).
-type TornadoInstance = {
-  balance(assets: unknown): Promise<
-    Array<{ asset: { contract: string }; amount: bigint; tag?: string }>
-  >;
-  notes(params: {
-    includeSpent?: boolean;
-  }): Promise<
-    Array<{ amount: bigint; assetAddress: bigint; timestamp: bigint }>
-  >;
-  prepareShield(
-    asset: { asset: { __type: "erc20"; contract: `0x${string}` }; amount: bigint },
-    options?: { strategy: number }
-  ): Promise<{ txns: Array<{ to: string; data: string; value: bigint }> }>;
-  prepareUnshield(
-    asset: { asset: { __type: "erc20"; contract: `0x${string}` }; amount: bigint },
-    to: `0x${string}`,
-    options?: { mode: "relayer" | "paymaster" }
-  ): Promise<unknown>;
-};
-
-type TornadoBroadcaster = { broadcast(op: unknown): Promise<unknown> };
 
 type RegistryState = {
   credentialId: string;
@@ -244,10 +169,6 @@ type RegistryState = {
   railgunUnshieldFeeBps: number;
   privacyPools: PPv1Instance | null;
   privacyPoolsBroadcaster: PPv1Broadcaster | null;
-  tornado: {
-    plugin: TornadoInstance;
-    broadcaster: TornadoBroadcaster;
-  } | null;
 };
 
 // The 0xbow relayer that submits Privacy Pools withdrawals. Overridable, no
@@ -363,11 +284,10 @@ export async function initPrivacy(
         railgunUnshieldFeeBps: 25,
         privacyPools: null,
         privacyPoolsBroadcaster: null,
-        tornado: null,
       };
 
-      // Each protocol initializes independently: one plugin failing (e.g. the
-      // Tornado worker not loading) must not take down the others.
+      // Each protocol initializes independently: one plugin failing must not
+      // take down the others.
       const failures: string[] = [];
 
       // Verified mode (light client) provider, shared by all protocols. Null
@@ -431,28 +351,11 @@ export async function initPrivacy(
         }
       }
 
-      if (enabled.includes("tornado") && isTornadoEnabledInBuild()) {
-        try {
-          next.tornado = await initTornado(
-            credentialId,
-            networkId,
-            chainId,
-            verifiedProvider
-          );
-        } catch (e) {
-          console.error("Tornado Cash init failed", e);
-          failures.push("Tornado Cash");
-        }
-      }
-
       state = next;
       // Only a total wipe-out is a hard error; partial failures are logged
       // and surfaced softly, other protocols still work.
       lastInitError =
-        failures.length > 0 &&
-        !next.railgun &&
-        !next.privacyPools &&
-        !next.tornado
+        failures.length > 0 && !next.railgun && !next.privacyPools
           ? `Failed to start: ${failures.join(", ")}`
           : null;
       return next;
@@ -491,8 +394,8 @@ function describeAsset(
   wrappedBase: `0x${string}` | null,
   networkId: string
 ): { symbol: string; decimals: number; contract: `0x${string}` | null } {
-  // Native markers: Railgun uses the wrapped base token, Privacy Pools/
-  // Tornado use the sentinel E_ADDRESS
+  // Native markers: Railgun uses the wrapped base token, Privacy Pools uses
+  // the sentinel E_ADDRESS
   const isNative =
     contract.toLowerCase() === E_ADDRESS.toLowerCase() ||
     (wrappedBase && contract.toLowerCase() === wrappedBase.toLowerCase());
@@ -517,7 +420,7 @@ async function getPrivateBalancesImpl(): Promise<PrivateBalanceRow[]> {
   const s = requireState();
   const rows: PrivateBalanceRow[] = [];
 
-  // Per-protocol try/catch: one protocol's sync failing (e.g. PP/Tornado
+  // Per-protocol try/catch: one protocol's sync failing (e.g. Privacy Pools
   // log-scan hitting an RPC's archive limit) must not hide the others'
   // balances (notably Railgun, which syncs via Subsquid, not eth_getLogs).
 
@@ -590,28 +493,6 @@ async function getPrivateBalancesImpl(): Promise<PrivateBalanceRow[]> {
     }
   }
 
-  if (s.tornado) {
-    try {
-      // Tornado holds fixed-denomination notes; report the total plus a note
-      // count. All notes here are native ETH pools in our config.
-      const notes = await s.tornado.plugin.notes({ includeSpent: false });
-      const total = notes.reduce((sum, n) => sum + n.amount, BigInt(0));
-      if (notes.length > 0) {
-        rows.push({
-          protocol: "tornado",
-          symbol: "ETH",
-          decimals: 18,
-          contract: null,
-          spendable: total,
-          pending: BigInt(0),
-          noteCount: notes.length,
-        });
-      }
-    } catch (e) {
-      console.error("Tornado balance sync failed", e);
-    }
-  }
-
   return rows;
 }
 
@@ -650,32 +531,6 @@ async function prepareShieldImpl(
       asset: ppAsset,
       amount: args.amount,
     });
-    return {
-      protocol,
-      txs: txns.map((tx) => ({
-        to: tx.to as `0x${string}`,
-        data: tx.data as `0x${string}`,
-        value: tx.value,
-      })),
-    };
-  }
-
-  // Tornado deposit: fixed-denomination pool(s). The amount must be a whole
-  // multiple of a supported denomination; the plugin picks pools by strategy.
-  if (protocol === "tornado") {
-    if (!s.tornado) {
-      throw new Error("Tornado Cash is not available.");
-    }
-    const { txns } = await s.tornado.plugin.prepareShield(
-      {
-        asset: {
-          __type: "erc20",
-          contract: (args.contract ?? (E_ADDRESS as `0x${string}`)) as `0x${string}`,
-        },
-        amount: args.amount,
-      },
-      { strategy: 0 /* MaxAnonymitySet */ }
-    );
     return {
       protocol,
       txs: txns.map((tx) => ({
@@ -786,35 +641,6 @@ async function prepareUnshieldImpl(
           await broadcaster.broadcast(
             op as unknown as Parameters<typeof broadcaster.broadcast>[0]
           );
-        },
-      },
-    };
-  }
-
-  // Tornado withdrawal via the 4337 paymaster (bundler pays gas, no EOA link
-  // and no fresh-address gas problem). Relayed, so no EOA signature.
-  if (protocol === "tornado") {
-    if (!s.tornado) {
-      throw new Error("Tornado Cash is not available.");
-    }
-    const op = await s.tornado.plugin.prepareUnshield(
-      {
-        asset: {
-          __type: "erc20",
-          contract: (args.contract ?? (E_ADDRESS as `0x${string}`)) as `0x${string}`,
-        },
-        amount: args.amount,
-      },
-      args.to,
-      { mode: "paymaster" }
-    );
-    const broadcaster = s.tornado.broadcaster;
-    return {
-      protocol,
-      feeNote: "Gas is covered by the Tornado paymaster from the withdrawn amount.",
-      relayed: {
-        broadcast: async () => {
-          await broadcaster.broadcast(op);
         },
       },
     };

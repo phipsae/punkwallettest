@@ -256,11 +256,11 @@ export function createPublicClientForNetwork(
   });
 }
 
-// RPC endpoint for privacy note-scanning. Privacy Pools and Tornado query
-// eth_getLogs over wide (archive) block ranges, which most free RPCs reject
-// (Alchemy free caps at 10 blocks; public nodes need an archive token).
-// Railgun is unaffected (it syncs via Subsquid). Set NEXT_PUBLIC_PRIVACY_RPC_URL
-// to an archive-capable endpoint to make PP/Tornado sync work.
+// RPC endpoint for privacy note-scanning. Privacy Pools queries eth_getLogs
+// over wide (archive) block ranges, which most free RPCs reject (Alchemy free
+// caps at 10 blocks; public nodes need an archive token). Railgun is
+// unaffected (it syncs via Subsquid). Set NEXT_PUBLIC_PRIVACY_RPC_URL to an
+// archive-capable endpoint to make Privacy Pools sync work.
 function getPrivacyRpcUrl(networkId: string): string {
   return process.env.NEXT_PUBLIC_PRIVACY_RPC_URL || getRpcUrl(networkId);
 }

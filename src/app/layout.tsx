@@ -16,10 +16,10 @@ import "./globals.css";
 //   origins cannot be enumerated. Still blocks http: exfil and downgrades.
 // - script-src 'wasm-unsafe-eval': instantiate the Railgun zk-prover
 //   WebAssembly.
-// - script-src 'unsafe-eval': REQUIRED by the snarkjs/ffjavascript provers
-//   used by Privacy Pools and Tornado Cash, which JIT field arithmetic via
-//   `new Function`. This is a real relaxation (it re-enables JS eval). It is
-//   ONLY needed for those two protocols; a Railgun-only build could drop it.
+// - script-src 'unsafe-eval': REQUIRED by the snarkjs/ffjavascript prover
+//   used by Privacy Pools, which JITs field arithmetic via `new Function`.
+//   This is a real relaxation (it re-enables JS eval). A Railgun-only build
+//   (Railgun proves in WASM) could drop it.
 const CSP =
   "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
