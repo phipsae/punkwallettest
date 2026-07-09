@@ -33,6 +33,19 @@ const nextConfig: NextConfig = {
         process.cwd(),
         "node_modules/@kohaku-eth/railgun/dist/pkg/index_bg.wasm"
       ),
+      // Tornado Cash off-thread state-manager worker. Bundled as a real
+      // worker entry (see tornadoWorkerLoader) so its nested workers come
+      // along too.
+      "@kohaku-tc-worker": path.join(
+        process.cwd(),
+        "node_modules/@kohaku-eth/tornado-cash/dist/state-manager.worker.js"
+      ),
+      // The package's internal subpath import for its worker loader; point it
+      // at our shim (its own browser loader is broken under webpack).
+      "#worker-loader": path.join(
+        process.cwd(),
+        "src/lib/tornadoWorkerLoader.ts"
+      ),
     };
 
     // The Kohaku SDKs dynamically import node:fs/promises etc. on their

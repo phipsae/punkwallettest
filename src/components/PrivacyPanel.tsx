@@ -645,7 +645,12 @@ export default function PrivacyPanel({
                 <div className="font-medium text-sm">
                   {PROTOCOL_LABELS[row.protocol]}
                 </div>
-                <div className="text-xs text-muted">{row.symbol}</div>
+                <div className="text-xs text-muted">
+                  {row.symbol}
+                  {row.noteCount !== undefined
+                    ? ` · ${row.noteCount} note${row.noteCount === 1 ? "" : "s"}`
+                    : ""}
+                </div>
               </div>
               <div className="text-right">
                 <div className="font-semibold tabular-nums text-sm">
@@ -788,14 +793,39 @@ function ShieldForm({
         ))}
       </div>
 
-      <input
-        type="text"
-        inputMode="decimal"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder={`Amount (${asset})`}
-        className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono"
-      />
+      {protocol === "tornado" ? (
+        <div className="space-y-2">
+          <label className="text-xs text-muted">Denomination (ETH)</label>
+          <div className="grid grid-cols-4 gap-2">
+            {["0.1", "1", "10", "100"].map((d) => (
+              <button
+                key={d}
+                onClick={() => setAmount(d)}
+                className={`py-2 rounded-sm text-sm font-medium border transition-colors ${
+                  amount === d
+                    ? "border-punk-purple bg-punk-purple/10 text-punk-purple"
+                    : "border-card-border bg-input-bg hover:border-muted"
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted">
+            Tornado uses fixed denominations. Larger, older pools have bigger
+            anonymity sets.
+          </p>
+        </div>
+      ) : (
+        <input
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder={`Amount (${asset})`}
+          className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono"
+        />
+      )}
       {protocol === "privacy-pools" && (
         <p className="text-[11px] text-muted">
           Deposits must be approved into an association set before they can be

@@ -168,12 +168,67 @@ async function ensureRailgunWasm(logLevel?: string): Promise<
   return railgun;
 }
 
+// Tornado Cash init. Dynamic import keeps its comlink Web Worker + circuit
+// machinery out of every build and lets a load failure be caught at runtime
+// (isolated per-protocol) rather than breaking the whole bundle. The worker
+// runs the fixed-denomination note scanning and Groth16 proving off-thread.
+async function initTornado(
+  credentialId: string,
+  networkId: string,
+  chainId: number
+): Promise<{ plugin: TornadoInstance; broadcaster: TornadoBroadcaster }> {
+  const tc = await import("@kohaku-eth/tornado-cash");
+  const protocolConfig =
+    tc.TornadoCashConfigs[chainId as keyof typeof tc.TornadoCashConfigs];
+  if (!protocolConfig) {
+    throw new Error(`Tornado Cash is not configured for chain ${chainId}`);
+  }
+  const host = buildHost(credentialId, networkId, "tornado");
+  // No stateManagerWorkerUrl: let our worker-loader shim create the worker via
+  // new Worker(new URL(...)) so webpack bundles the full worker graph.
+  const plugin = tc.createTCPlugin(host, {
+    accountIndex: 0,
+    protocolConfig: protocolConfig as unknown as Parameters<
+      typeof tc.createTCPlugin
+    >[1]["protocolConfig"],
+    paymasterConfig: tc.TornadoPaymasterConfigs,
+  }) as unknown as TornadoInstance;
+  const broadcaster = tc.createTCBroadcaster(host, {
+    paymasterConfig: tc.TornadoPaymasterConfigs,
+  }) as unknown as TornadoBroadcaster;
+  return { plugin, broadcaster };
+}
+
 // ---------------------------------------------------------------------------
 // Registry state
 
 type RailgunPluginInstance = Awaited<
   ReturnType<typeof import("@kohaku-eth/railgun").createRailgunPlugin>
 >;
+
+// Structural shape of the Tornado plugin we use (loaded via dynamic import,
+// so we avoid a static type dependency that would pull it into every build).
+type TornadoInstance = {
+  balance(assets: unknown): Promise<
+    Array<{ asset: { contract: string }; amount: bigint; tag?: string }>
+  >;
+  notes(params: {
+    includeSpent?: boolean;
+  }): Promise<
+    Array<{ amount: bigint; assetAddress: bigint; timestamp: bigint }>
+  >;
+  prepareShield(
+    asset: { asset: { __type: "erc20"; contract: `0x${string}` }; amount: bigint },
+    options?: { strategy: number }
+  ): Promise<{ txns: Array<{ to: string; data: string; value: bigint }> }>;
+  prepareUnshield(
+    asset: { asset: { __type: "erc20"; contract: `0x${string}` }; amount: bigint },
+    to: `0x${string}`,
+    options?: { mode: "relayer" | "paymaster" }
+  ): Promise<unknown>;
+};
+
+type TornadoBroadcaster = { broadcast(op: unknown): Promise<unknown> };
 
 type RegistryState = {
   credentialId: string;
@@ -184,6 +239,10 @@ type RegistryState = {
   railgunUnshieldFeeBps: number;
   privacyPools: PPv1Instance | null;
   privacyPoolsBroadcaster: PPv1Broadcaster | null;
+  tornado: {
+    plugin: TornadoInstance;
+    broadcaster: TornadoBroadcaster;
+  } | null;
 };
 
 // The 0xbow relayer that submits Privacy Pools withdrawals. Overridable, no
@@ -274,51 +333,83 @@ export async function initPrivacy(
         railgunUnshieldFeeBps: 25,
         privacyPools: null,
         privacyPoolsBroadcaster: null,
+        tornado: null,
       };
 
+      // Each protocol initializes independently: one plugin failing (e.g. the
+      // Tornado worker not loading) must not take down the others.
+      const failures: string[] = [];
+
       if (enabled.includes("railgun")) {
-        const railgunModule = await ensureRailgunWasm();
-        const host = buildHost(credentialId, networkId, "railgun");
-        next.railgun = await railgunModule.createRailgunPlugin(host, {
-          keyIndex: 0,
-          poi: true,
-        });
-        const chain = railgunModule.chainConfig(BigInt(chainId));
-        next.railgunWrappedBase = chain?.wrappedBaseToken ?? null;
-        next.railgunUnshieldFeeBps = chain?.unshieldFeeBps ?? 25;
+        try {
+          const railgunModule = await ensureRailgunWasm();
+          const host = buildHost(credentialId, networkId, "railgun");
+          next.railgun = await railgunModule.createRailgunPlugin(host, {
+            keyIndex: 0,
+            poi: true,
+          });
+          const chain = railgunModule.chainConfig(BigInt(chainId));
+          next.railgunWrappedBase = chain?.wrappedBaseToken ?? null;
+          next.railgunUnshieldFeeBps = chain?.unshieldFeeBps ?? 25;
+        } catch (e) {
+          console.error("Railgun init failed", e);
+          failures.push("Railgun");
+        }
       }
 
       if (enabled.includes("privacy-pools")) {
-        const entry =
-          PrivacyPoolsV1_0xBow[chainId as keyof typeof PrivacyPoolsV1_0xBow];
-        if (entry) {
-          const host = buildHost(credentialId, networkId, "privacy-pools");
-          next.privacyPools = createPPv1Plugin(host, {
-            accountIndex: 0,
-            entrypoint: {
-              // IEntrypoint.address is a bigint (ox/Address), the 0xBow config
-              // provides it as a hex string
-              address: BigInt(
-                entry.entrypoint.entrypointAddress
-              ) as unknown as bigint & {},
-              deploymentBlock: entry.entrypoint.deploymentBlock,
-            },
-            broadcasterUrl: PRIVACY_POOLS_RELAYER_URL
-              ? { default: PRIVACY_POOLS_RELAYER_URL }
-              : {},
-            aspServiceFactory: () =>
-              new OxBowAspService({ network: host.network }),
-          });
-          if (PRIVACY_POOLS_RELAYER_URL) {
-            next.privacyPoolsBroadcaster = createPPv1Broadcaster(host, {
-              broadcasterUrl: { default: PRIVACY_POOLS_RELAYER_URL },
+        try {
+          const entry =
+            PrivacyPoolsV1_0xBow[chainId as keyof typeof PrivacyPoolsV1_0xBow];
+          if (entry) {
+            const host = buildHost(credentialId, networkId, "privacy-pools");
+            next.privacyPools = createPPv1Plugin(host, {
+              accountIndex: 0,
+              entrypoint: {
+                // IEntrypoint.address is a bigint (ox/Address), the 0xBow
+                // config provides it as a hex string
+                address: BigInt(
+                  entry.entrypoint.entrypointAddress
+                ) as unknown as bigint & {},
+                deploymentBlock: entry.entrypoint.deploymentBlock,
+              },
+              broadcasterUrl: PRIVACY_POOLS_RELAYER_URL
+                ? { default: PRIVACY_POOLS_RELAYER_URL }
+                : {},
+              aspServiceFactory: () =>
+                new OxBowAspService({ network: host.network }),
             });
+            if (PRIVACY_POOLS_RELAYER_URL) {
+              next.privacyPoolsBroadcaster = createPPv1Broadcaster(host, {
+                broadcasterUrl: { default: PRIVACY_POOLS_RELAYER_URL },
+              });
+            }
           }
+        } catch (e) {
+          console.error("Privacy Pools init failed", e);
+          failures.push("Privacy Pools");
+        }
+      }
+
+      if (enabled.includes("tornado") && isTornadoEnabledInBuild()) {
+        try {
+          next.tornado = await initTornado(credentialId, networkId, chainId);
+        } catch (e) {
+          console.error("Tornado Cash init failed", e);
+          failures.push("Tornado Cash");
         }
       }
 
       state = next;
-      lastInitError = null;
+      // Only a total wipe-out is a hard error; partial failures are logged
+      // and surfaced softly, other protocols still work.
+      lastInitError =
+        failures.length > 0 &&
+        !next.railgun &&
+        !next.privacyPools &&
+        !next.tornado
+          ? `Failed to start: ${failures.join(", ")}`
+          : null;
       return next;
     })().catch((error) => {
       initPromise = null;
@@ -442,6 +533,24 @@ export async function getPrivateBalances(): Promise<PrivateBalanceRow[]> {
     rows.push(...merged.values());
   }
 
+  if (s.tornado) {
+    // Tornado holds fixed-denomination notes; report the total plus a note
+    // count. All notes here are native ETH pools in our config.
+    const notes = await s.tornado.plugin.notes({ includeSpent: false });
+    const total = notes.reduce((sum, n) => sum + n.amount, BigInt(0));
+    if (notes.length > 0) {
+      rows.push({
+        protocol: "tornado",
+        symbol: "ETH",
+        decimals: 18,
+        contract: null,
+        spendable: total,
+        pending: BigInt(0),
+        noteCount: notes.length,
+      });
+    }
+  }
+
   return rows;
 }
 
@@ -480,6 +589,32 @@ export async function prepareShield(
       asset: ppAsset,
       amount: args.amount,
     });
+    return {
+      protocol,
+      txs: txns.map((tx) => ({
+        to: tx.to as `0x${string}`,
+        data: tx.data as `0x${string}`,
+        value: tx.value,
+      })),
+    };
+  }
+
+  // Tornado deposit: fixed-denomination pool(s). The amount must be a whole
+  // multiple of a supported denomination; the plugin picks pools by strategy.
+  if (protocol === "tornado") {
+    if (!s.tornado) {
+      throw new Error("Tornado Cash is not available.");
+    }
+    const { txns } = await s.tornado.plugin.prepareShield(
+      {
+        asset: {
+          __type: "erc20",
+          contract: (args.contract ?? (E_ADDRESS as `0x${string}`)) as `0x${string}`,
+        },
+        amount: args.amount,
+      },
+      { strategy: 0 /* MaxAnonymitySet */ }
+    );
     return {
       protocol,
       txs: txns.map((tx) => ({
@@ -590,6 +725,35 @@ export async function prepareUnshield(
           await broadcaster.broadcast(
             op as unknown as Parameters<typeof broadcaster.broadcast>[0]
           );
+        },
+      },
+    };
+  }
+
+  // Tornado withdrawal via the 4337 paymaster (bundler pays gas, no EOA link
+  // and no fresh-address gas problem). Relayed, so no EOA signature.
+  if (protocol === "tornado") {
+    if (!s.tornado) {
+      throw new Error("Tornado Cash is not available.");
+    }
+    const op = await s.tornado.plugin.prepareUnshield(
+      {
+        asset: {
+          __type: "erc20",
+          contract: (args.contract ?? (E_ADDRESS as `0x${string}`)) as `0x${string}`,
+        },
+        amount: args.amount,
+      },
+      args.to,
+      { mode: "paymaster" }
+    );
+    const broadcaster = s.tornado.broadcaster;
+    return {
+      protocol,
+      feeNote: "Gas is covered by the Tornado paymaster from the withdrawn amount.",
+      relayed: {
+        broadcast: async () => {
+          await broadcaster.broadcast(op);
         },
       },
     };
