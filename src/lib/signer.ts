@@ -137,6 +137,33 @@ export async function approveWalletConnectRequest(
   });
 }
 
+// Sign and broadcast a batch of prepared transactions in order (e.g. approve
+// then shield, or unshield then unwrap). Each transaction is its own passkey
+// ceremony. Stops and returns the first failure. Waits for each receipt so
+// the next step (which may depend on it) sees confirmed state.
+export async function signAndSendBatch(args: {
+  wallet: SignerTarget;
+  txs: Array<{ to: `0x${string}`; data: `0x${string}`; value: bigint }>;
+  networkId: string;
+}): Promise<{ hashes: `0x${string}`[]; success: boolean; error?: string }> {
+  const hashes: `0x${string}`[] = [];
+  for (let i = 0; i < args.txs.length; i++) {
+    const result = await signAndSendTransaction({
+      wallet: args.wallet,
+      to: args.txs[i].to,
+      data: args.txs[i].data,
+      value: args.txs[i].value,
+      networkId: args.networkId,
+      waitForReceipt: true,
+    });
+    if (!result.success) {
+      return { hashes, success: false, error: result.error };
+    }
+    hashes.push(result.hash);
+  }
+  return { hashes, success: true };
+}
+
 // THE ONLY FUNCTION IN THE APP THAT RETURNS KEY MATERIAL. Used exclusively by
 // the export screen, which must keep the value in short-lived state and wipe
 // it on hide, view exit, timeout, and backgrounding. Fresh prompt per call.

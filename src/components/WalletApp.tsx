@@ -97,6 +97,10 @@ import {
 } from "@/lib/clearsigning";
 import { safeImageUrl } from "@/lib/urlsafety";
 import ClearSigningPanel from "./ClearSigningPanel";
+import PrivacyPanel from "./PrivacyPanel";
+import { isPrivacySupportedNetwork } from "@/lib/kohaku";
+import { clearKohakuSession } from "@/lib/kohakuSession";
+import { resetPrivacy } from "@/lib/kohaku";
 
 // Lock the app after this much inactivity while unlocked
 const AUTO_LOCK_MS = 5 * 60 * 1000;
@@ -130,6 +134,9 @@ export default function WalletApp() {
   const [selectedWalletIndex, setSelectedWalletIndex] = useState<number | null>(
     null
   );
+
+  // Public / Private face of the wallet home (privacy tab)
+  const [walletFace, setWalletFace] = useState<"public" | "private">("public");
 
   // Send form state
   const [sendTo, setSendTo] = useState("");
@@ -249,6 +256,9 @@ export default function WalletApp() {
   // kept so re-unlocking is one passkey prompt.
   const lockWallet = useCallback(() => {
     wipeTransientSecrets();
+    // Wipe the privacy root secret and tear down the plugins on lock
+    clearKohakuSession();
+    resetPrivacy();
     if (sessionRequest) {
       rejectSessionRequest(sessionRequest).catch(() => {});
       setSessionRequest(null);
@@ -259,6 +269,7 @@ export default function WalletApp() {
     }
     setWallet(null);
     setBalance("0");
+    setWalletFace("public");
     setView("onboarding");
   }, [wipeTransientSecrets, sessionRequest, sessionProposal]);
 
@@ -1019,6 +1030,11 @@ export default function WalletApp() {
     setError(null);
 
     try {
+      // Switching wallets: drop any prior privacy session/plugins before the
+      // new unlock installs its own root
+      clearKohakuSession();
+      resetPrivacy();
+      setWalletFace("public");
       // One unlock path for derived and imported wallets alike
       const walletData = await unlockIdentityFor(walletInfo);
 
@@ -2208,6 +2224,44 @@ export default function WalletApp() {
         {/* Balance Card */}
         {view === "wallet" && wallet && (
           <div className="bg-card-bg border border-card-border rounded-sm p-6 space-y-6 animate-fade-in">
+            {/* Public / Private toggle (only where privacy protocols exist) */}
+            {isPrivacySupportedNetwork(network) && (
+              <div className="flex rounded-sm bg-input-bg border border-card-border p-1">
+                <button
+                  onClick={() => setWalletFace("public")}
+                  className={`flex-1 py-2 rounded-sm text-sm font-medium transition-colors ${
+                    walletFace === "public"
+                      ? "bg-accent text-background"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  Public
+                </button>
+                <button
+                  onClick={() => setWalletFace("private")}
+                  className={`flex-1 py-2 rounded-sm text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                    walletFace === "private"
+                      ? "bg-punk-purple text-white"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  🛡 Private
+                </button>
+              </div>
+            )}
+
+            {walletFace === "private" && isPrivacySupportedNetwork(network) ? (
+              <PrivacyPanel
+                wallet={wallet}
+                network={network}
+                onError={(m) => setError(m)}
+                onSuccess={(m) => {
+                  setSuccess(m);
+                  setTimeout(() => setSuccess(null), 3000);
+                }}
+              />
+            ) : (
+              <>
             {/* Balance */}
             <div className="text-center py-4 relative">
               {/* Network Selector - Top Left */}
@@ -2407,6 +2461,8 @@ export default function WalletApp() {
                 </div>
               )}
             </div>
+              </>
+            )}
           </div>
         )}
 
