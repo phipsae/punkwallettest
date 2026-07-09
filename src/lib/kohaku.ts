@@ -12,15 +12,17 @@
 import { encodeFunctionData, erc20Abi } from "viem";
 import { viem as viemProviderAdapter } from "@kohaku-eth/provider/viem";
 import type { Host } from "@kohaku-eth/plugins";
-import {
-  createPPv1Plugin,
-  createPPv1Broadcaster,
-  OxBowAspService,
-  PrivacyPoolsV1_0xBow,
-  E_ADDRESS,
-  type PPv1Instance,
-  type PPv1Broadcaster,
-} from "@kohaku-eth/privacy-pools";
+// Privacy Pools pulls in snarkjs/ffjavascript, which JIT field arithmetic via
+// `new Function` at module-eval time. Importing it statically would (a) load
+// that whole stack on every page view and (b) trip the CSP at startup and
+// brick the wallet. So we keep only the types here and import the values
+// lazily inside initPrivacy. Same rationale as the Railgun/Tornado dynamic
+// imports.
+import type { PPv1Instance, PPv1Broadcaster } from "@kohaku-eth/privacy-pools";
+
+// Native-asset sentinel used by Privacy Pools and Tornado (mirrors their
+// exported E_ADDRESS; inlined to avoid a static import of the PP module).
+const E_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 import {
   createPublicClientForNetwork,
   getAllNetworks,
@@ -373,6 +375,12 @@ export async function initPrivacy(
 
       if (enabled.includes("privacy-pools")) {
         try {
+          const {
+            createPPv1Plugin,
+            createPPv1Broadcaster,
+            OxBowAspService,
+            PrivacyPoolsV1_0xBow,
+          } = await import("@kohaku-eth/privacy-pools");
           const entry =
             PrivacyPoolsV1_0xBow[chainId as keyof typeof PrivacyPoolsV1_0xBow];
           if (entry) {

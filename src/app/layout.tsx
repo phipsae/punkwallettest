@@ -14,11 +14,14 @@ import "./globals.css";
 //   and no unsafe-eval.
 // - connect-src https: wss:: user-added custom RPC URLs are arbitrary, so
 //   origins cannot be enumerated. Still blocks http: exfil and downgrades.
-// - script-src 'wasm-unsafe-eval': required to instantiate the Kohaku
-//   zk-prover WebAssembly (Railgun/Privacy Pools). Scoped to wasm only;
-//   JS eval stays blocked.
+// - script-src 'wasm-unsafe-eval': instantiate the Railgun zk-prover
+//   WebAssembly.
+// - script-src 'unsafe-eval': REQUIRED by the snarkjs/ffjavascript provers
+//   used by Privacy Pools and Tornado Cash, which JIT field arithmetic via
+//   `new Function`. This is a real relaxation (it re-enables JS eval). It is
+//   ONLY needed for those two protocols; a Railgun-only build could drop it.
 const CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-geist-sans",
