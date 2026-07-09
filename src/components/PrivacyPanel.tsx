@@ -69,6 +69,7 @@ export default function PrivacyPanel({
 
   // Form state
   const [shieldAmount, setShieldAmount] = useState("");
+  const [shieldProtocol, setShieldProtocol] = useState<ProtocolId>("railgun");
   const [unshieldAmount, setUnshieldAmount] = useState("");
   const [unshieldTo, setUnshieldTo] = useState("");
   const [activeRow, setActiveRow] = useState<PrivateBalanceRow | null>(null);
@@ -133,7 +134,11 @@ export default function PrivacyPanel({
         isImported: wallet.isImported,
       });
       setAcknowledgedPrivacyRisk();
-      setProtocolEnabled(wallet.credentialId, "railgun", true);
+      // One gate enables every protocol available in this build; they all
+      // share the same passkey-derived root and session.
+      for (const p of getAvailableProtocols()) {
+        setProtocolEnabled(wallet.credentialId, p, true);
+      }
       await initPrivacy(wallet.credentialId, network);
       setReady(true);
       onSuccess("Private balance enabled.");
@@ -148,7 +153,9 @@ export default function PrivacyPanel({
 
   const handleShield = useCallback(async () => {
     const row = activeRow;
-    const decimals = row?.decimals ?? 18;
+    // Privacy Pools only supports ETH deposits in this version
+    const contract = shieldProtocol === "privacy-pools" ? null : row?.contract ?? null;
+    const decimals = contract === null ? 18 : row?.decimals ?? 18;
     let amount: bigint;
     try {
       amount = parseUnits(shieldAmount, decimals);
@@ -162,8 +169,8 @@ export default function PrivacyPanel({
     }
     setBusy(true);
     try {
-      const prepared = await prepareShield("railgun", {
-        contract: row?.contract ?? null,
+      const prepared = await prepareShield(shieldProtocol, {
+        contract,
         amount,
         owner: wallet.address,
       });
@@ -190,7 +197,7 @@ export default function PrivacyPanel({
     } finally {
       setBusy(false);
     }
-  }, [activeRow, shieldAmount, wallet, network, onError, onSuccess, refreshBalances]);
+  }, [activeRow, shieldAmount, shieldProtocol, wallet, network, onError, onSuccess, refreshBalances]);
 
   const handleUnshield = useCallback(async () => {
     const row = activeRow;
@@ -220,27 +227,33 @@ export default function PrivacyPanel({
     try {
       const isOwnAddress =
         destination.toLowerCase() === wallet.address.toLowerCase();
-      const prepared = await prepareUnshield("railgun", {
+      const prepared = await prepareUnshield(row.protocol, {
         contract: row.contract,
         amount,
         to: destination as `0x${string}`,
         isOwnAddress,
       });
       setProving(false);
-      const txs = [...prepared.txs];
-      if (prepared.unwrapTx) txs.push(prepared.unwrapTx);
-      const result = await signAndSendBatch({
-        wallet: {
-          credentialId: wallet.credentialId,
-          address: wallet.address,
-          isImported: wallet.isImported,
-        },
-        txs,
-        networkId: network,
-      });
-      if (!result.success) {
-        onError(result.error ?? "Unshield failed.");
-        return;
+      if (prepared.relayed) {
+        // Relayed (Privacy Pools/Tornado): the relayer submits, no EOA signing
+        await prepared.relayed.broadcast();
+      } else if (prepared.selfBroadcast) {
+        const txs = [...prepared.selfBroadcast.txs];
+        if (prepared.selfBroadcast.unwrapTx)
+          txs.push(prepared.selfBroadcast.unwrapTx);
+        const result = await signAndSendBatch({
+          wallet: {
+            credentialId: wallet.credentialId,
+            address: wallet.address,
+            isImported: wallet.isImported,
+          },
+          txs,
+          networkId: network,
+        });
+        if (!result.success) {
+          onError(result.error ?? "Unshield failed.");
+          return;
+        }
       }
       onSuccess("Unshielded successfully.");
       setUnshieldAmount("");
@@ -336,9 +349,9 @@ export default function PrivacyPanel({
   if (panelView === "shield") {
     return (
       <ShieldForm
-        rows={balances}
-        activeRow={activeRow}
-        setActiveRow={setActiveRow}
+        protocol={shieldProtocol}
+        setProtocol={setShieldProtocol}
+        tokenRow={activeRow}
         amount={shieldAmount}
         setAmount={setShieldAmount}
         busy={busy}
@@ -566,24 +579,27 @@ function RiskModal({
 }
 
 function ShieldForm({
-  rows,
-  activeRow,
-  setActiveRow,
+  protocol,
+  setProtocol,
+  tokenRow,
   amount,
   setAmount,
   busy,
   onSubmit,
   onBack,
 }: {
-  rows: PrivateBalanceRow[];
-  activeRow: PrivateBalanceRow | null;
-  setActiveRow: (r: PrivateBalanceRow | null) => void;
+  protocol: ProtocolId;
+  setProtocol: (p: ProtocolId) => void;
+  tokenRow: PrivateBalanceRow | null;
   amount: string;
   setAmount: (v: string) => void;
   busy: boolean;
   onSubmit: () => void;
   onBack: () => void;
 }) {
+  const available = getAvailableProtocols();
+  const asset =
+    protocol === "railgun" && tokenRow?.contract ? tokenRow.symbol : "ETH";
   return (
     <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -592,23 +608,37 @@ function ShieldForm({
           Back
         </button>
       </div>
-      <p className="text-xs text-muted">
-        Moves funds from your public wallet into your private balance via
-        Railgun. This transaction is visible on-chain; the resulting balance is
-        not.
-      </p>
+
+      <div className="space-y-2">
+        <label className="text-xs text-muted">Protocol</label>
+        {available.map((p) => (
+          <button
+            key={p}
+            onClick={() => setProtocol(p)}
+            className={`w-full text-left p-3 rounded-sm border transition-colors ${
+              protocol === p
+                ? "border-punk-purple bg-punk-purple/10"
+                : "border-card-border bg-input-bg hover:border-muted"
+            }`}
+          >
+            <div className="font-medium text-sm">{PROTOCOL_LABELS[p]}</div>
+            <div className="text-[11px] text-muted">{PROTOCOL_BLURBS[p]}</div>
+          </button>
+        ))}
+      </div>
+
       <input
         type="text"
         inputMode="decimal"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
-        placeholder="Amount (ETH)"
+        placeholder={`Amount (${asset})`}
         className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono"
       />
-      {rows.length > 0 && (
+      {protocol === "privacy-pools" && (
         <p className="text-[11px] text-muted">
-          Shielding ETH. Token shielding uses whichever token row you tap in
-          the overview.
+          Deposits must be approved into an association set before they can be
+          spent privately. A vetting fee applies.
         </p>
       )}
       <button
@@ -618,8 +648,6 @@ function ShieldForm({
       >
         {busy ? "Shielding…" : "Shield"}
       </button>
-      <input type="hidden" value={activeRow?.symbol ?? ""} readOnly />
-      <button className="hidden" onClick={() => setActiveRow(null)} />
     </div>
   );
 }

@@ -13,6 +13,15 @@ import { encodeFunctionData, erc20Abi } from "viem";
 import { viem as viemProviderAdapter } from "@kohaku-eth/provider/viem";
 import type { Host } from "@kohaku-eth/plugins";
 import {
+  createPPv1Plugin,
+  createPPv1Broadcaster,
+  OxBowAspService,
+  PrivacyPoolsV1_0xBow,
+  E_ADDRESS,
+  type PPv1Instance,
+  type PPv1Broadcaster,
+} from "@kohaku-eth/privacy-pools";
+import {
   createPublicClientForNetwork,
   getAllNetworks,
 } from "./wallet";
@@ -93,14 +102,30 @@ export type PreparedShield = {
   txs: PreparedTx[];
 };
 
+// Unshielding takes one of two shapes depending on the protocol:
+// - self-broadcast (Railgun): the wallet EOA signs and submits the proved
+//   transactions itself. Links the EOA on-chain, fine for withdraw-to-self.
+// - relayed (Privacy Pools, Tornado): a relayer/bundler submits, so no EOA
+//   signature and no EOA link. The registry owns the network call.
 export type PreparedUnshield = {
   protocol: ProtocolId;
-  // Self-broadcast transactions, signed and sent in order by the wallet EOA
-  txs: PreparedTx[];
-  // Railgun native unshields deliver WETH, this unwraps it (only offered
-  // when the destination is the wallet's own address)
-  unwrapTx?: PreparedTx;
   feeNote?: string;
+  selfBroadcast?: {
+    txs: PreparedTx[];
+    // Railgun native unshields deliver WETH; this unwraps it (only when the
+    // destination is the wallet's own address)
+    unwrapTx?: PreparedTx;
+  };
+  relayed?: {
+    // Submits via the protocol's relayer. No passkey prompt (no EOA signing).
+    broadcast: () => Promise<void>;
+  };
+};
+
+// A public exit from a pending Privacy Pools deposit (ASP never approved it).
+// De-anonymizing by design: funds return to the depositing address.
+export type PreparedRagequit = {
+  txs: PreparedTx[];
 };
 
 export class PrivacyInitError extends Error {
@@ -146,7 +171,14 @@ type RegistryState = {
   railgun: RailgunPluginInstance | null;
   railgunWrappedBase: `0x${string}` | null;
   railgunUnshieldFeeBps: number;
+  privacyPools: PPv1Instance | null;
+  privacyPoolsBroadcaster: PPv1Broadcaster | null;
 };
+
+// The 0xbow relayer that submits Privacy Pools withdrawals. Overridable, no
+// public default is documented, so withdraw stays gated until it is set.
+const PRIVACY_POOLS_RELAYER_URL =
+  process.env.NEXT_PUBLIC_PRIVACY_POOLS_RELAYER_URL || "";
 
 let state: RegistryState | null = null;
 let initPromise: Promise<RegistryState> | null = null;
@@ -229,6 +261,8 @@ export async function initPrivacy(
         railgun: null,
         railgunWrappedBase: null,
         railgunUnshieldFeeBps: 25,
+        privacyPools: null,
+        privacyPoolsBroadcaster: null,
       };
 
       if (enabled.includes("railgun")) {
@@ -241,6 +275,35 @@ export async function initPrivacy(
         const chain = railgunModule.chainConfig(BigInt(chainId));
         next.railgunWrappedBase = chain?.wrappedBaseToken ?? null;
         next.railgunUnshieldFeeBps = chain?.unshieldFeeBps ?? 25;
+      }
+
+      if (enabled.includes("privacy-pools")) {
+        const entry =
+          PrivacyPoolsV1_0xBow[chainId as keyof typeof PrivacyPoolsV1_0xBow];
+        if (entry) {
+          const host = buildHost(credentialId, networkId, "privacy-pools");
+          next.privacyPools = createPPv1Plugin(host, {
+            accountIndex: 0,
+            entrypoint: {
+              // IEntrypoint.address is a bigint (ox/Address), the 0xBow config
+              // provides it as a hex string
+              address: BigInt(
+                entry.entrypoint.entrypointAddress
+              ) as unknown as bigint & {},
+              deploymentBlock: entry.entrypoint.deploymentBlock,
+            },
+            broadcasterUrl: PRIVACY_POOLS_RELAYER_URL
+              ? { default: PRIVACY_POOLS_RELAYER_URL }
+              : {},
+            aspServiceFactory: () =>
+              new OxBowAspService({ network: host.network }),
+          });
+          if (PRIVACY_POOLS_RELAYER_URL) {
+            next.privacyPoolsBroadcaster = createPPv1Broadcaster(host, {
+              broadcasterUrl: { default: PRIVACY_POOLS_RELAYER_URL },
+            });
+          }
+        }
       }
 
       state = next;
@@ -281,7 +344,12 @@ function describeAsset(
   wrappedBase: `0x${string}` | null,
   networkId: string
 ): { symbol: string; decimals: number; contract: `0x${string}` | null } {
-  if (wrappedBase && contract.toLowerCase() === wrappedBase.toLowerCase()) {
+  // Native markers: Railgun uses the wrapped base token, Privacy Pools/
+  // Tornado use the sentinel E_ADDRESS
+  const isNative =
+    contract.toLowerCase() === E_ADDRESS.toLowerCase() ||
+    (wrappedBase && contract.toLowerCase() === wrappedBase.toLowerCase());
+  if (isNative) {
     return { symbol: "ETH", decimals: 18, contract: null };
   }
   const token = tokenListFor(networkId).find(
@@ -333,6 +401,36 @@ export async function getPrivateBalances(): Promise<PrivateBalanceRow[]> {
     rows.push(...merged.values());
   }
 
+  if (s.privacyPools) {
+    // PP balance returns approved (spendable) + a 'pending' tag per asset
+    const balances = await s.privacyPools.balance(undefined);
+    const merged = new Map<string, PrivateBalanceRow>();
+    for (const b of balances) {
+      const desc = describeAsset(
+        b.asset.contract as `0x${string}`,
+        null,
+        s.networkId
+      );
+      const key = desc.contract ?? "native";
+      const row =
+        merged.get(key) ??
+        ({
+          protocol: "privacy-pools",
+          ...desc,
+          spendable: BigInt(0),
+          pending: BigInt(0),
+        } as PrivateBalanceRow);
+      if (b.tag === "pending") {
+        row.pending += b.amount;
+        row.pendingLabel = "awaiting ASP approval";
+      } else {
+        row.spendable += b.amount;
+      }
+      merged.set(key, row);
+    }
+    rows.push(...merged.values());
+  }
+
   return rows;
 }
 
@@ -356,6 +454,31 @@ export async function prepareShield(
   }
 ): Promise<PreparedShield> {
   const s = requireState();
+
+  // Privacy Pools deposit: single self-broadcast tx to the entrypoint (native
+  // ETH uses the E_ADDRESS sentinel). Handles its own vetting fee internally.
+  if (protocol === "privacy-pools") {
+    if (!s.privacyPools) {
+      throw new Error("Privacy Pools is not available on this network.");
+    }
+    const ppAsset = {
+      __type: "erc20" as const,
+      contract: (args.contract ?? (E_ADDRESS as `0x${string}`)) as `0x${string}`,
+    };
+    const { txns } = await s.privacyPools.prepareShield({
+      asset: ppAsset,
+      amount: args.amount,
+    });
+    return {
+      protocol,
+      txs: txns.map((tx) => ({
+        to: tx.to as `0x${string}`,
+        data: tx.data as `0x${string}`,
+        value: tx.value,
+      })),
+    };
+  }
+
   if (protocol !== "railgun" || !s.railgun) {
     throw new Error(`Shielding via ${protocol} is not available yet.`);
   }
@@ -422,6 +545,45 @@ export async function prepareUnshield(
   }
 ): Promise<PreparedUnshield> {
   const s = requireState();
+
+  // Privacy Pools withdrawal is relayed (the relayer submits and pays gas),
+  // so the EOA never signs it. Requires a configured relayer.
+  if (protocol === "privacy-pools") {
+    if (!s.privacyPools) {
+      throw new Error("Privacy Pools is not available on this network.");
+    }
+    if (args.contract === null) {
+      throw new Error(
+        "Privacy Pools does not support withdrawing native ETH in this version."
+      );
+    }
+    if (!s.privacyPoolsBroadcaster) {
+      throw new Error(
+        "Privacy Pools withdrawals need a relayer. Set NEXT_PUBLIC_PRIVACY_POOLS_RELAYER_URL."
+      );
+    }
+    // Proving happens inside prepareUnshield (in-browser)
+    const op = await s.privacyPools.prepareUnshield(
+      {
+        asset: { __type: "erc20", contract: args.contract },
+        amount: args.amount,
+      },
+      args.to
+    );
+    const broadcaster = s.privacyPoolsBroadcaster;
+    return {
+      protocol,
+      feeNote: "The relayer deducts its fee from the withdrawn amount.",
+      relayed: {
+        broadcast: async () => {
+          await broadcaster.broadcast(
+            op as unknown as Parameters<typeof broadcaster.broadcast>[0]
+          );
+        },
+      },
+    };
+  }
+
   if (protocol !== "railgun" || !s.railgun) {
     throw new Error(`Unshielding via ${protocol} is not available yet.`);
   }
@@ -485,8 +647,30 @@ export async function prepareUnshield(
   const feePct = s.railgunUnshieldFeeBps / 100;
   return {
     protocol,
-    txs,
-    unwrapTx,
+    selfBroadcast: { txs, unwrapTx },
     feeNote: `Railgun charges a ${feePct}% unshield fee (added on top so the recipient gets the exact amount).`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ragequit (Privacy Pools only): reclaim a deposit the ASP never approved.
+// Public, self-broadcast, de-anonymizing.
+
+export async function prepareRagequit(
+  labels: unknown[]
+): Promise<PreparedRagequit> {
+  const s = requireState();
+  if (!s.privacyPools) {
+    throw new Error("Privacy Pools is not available on this network.");
+  }
+  const { txns } = await s.privacyPools.ragequit(
+    labels as Parameters<typeof s.privacyPools.ragequit>[0]
+  );
+  return {
+    txs: txns.map((tx) => ({
+      to: tx.to as `0x${string}`,
+      data: tx.data as `0x${string}`,
+      value: tx.value,
+    })),
   };
 }
