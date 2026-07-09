@@ -19,7 +19,8 @@ const eslintConfig = defineConfig([
     "scripts/**",
   ]),
   // Key material must stay behind the signer boundary: only signer.ts may
-  // import the escape hatch that exposes the private key.
+  // import the escape hatches that expose the private key or the Kohaku
+  // privacy root (setKohakuSession is the sink the root flows into).
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/lib/signer.ts", "src/lib/passkey.ts"],
@@ -30,17 +31,29 @@ const eslintConfig = defineConfig([
           paths: [
             {
               name: "@/lib/passkey",
-              importNames: ["unsafeWithSessionKey"],
+              importNames: ["unsafeWithSessionKey", "unsafeWithSessionSecrets"],
               message:
-                "unsafeWithSessionKey exposes the private key. Only src/lib/signer.ts may use it - add a signer.ts function instead.",
+                "unsafeWithSessionKey/unsafeWithSessionSecrets expose key material. Only src/lib/signer.ts may use them - add a signer.ts function instead.",
+            },
+            {
+              name: "@/lib/kohakuSession",
+              importNames: ["setKohakuSession"],
+              message:
+                "setKohakuSession installs the privacy root secret. Only src/lib/signer.ts may call it.",
             },
           ],
           patterns: [
             {
               group: ["**/passkey"],
-              importNamePattern: "^unsafeWithSessionKey$",
+              importNamePattern: "^unsafeWithSession(Key|Secrets)$",
               message:
-                "unsafeWithSessionKey exposes the private key. Only src/lib/signer.ts may use it - add a signer.ts function instead.",
+                "unsafeWithSessionKey/unsafeWithSessionSecrets expose key material. Only src/lib/signer.ts may use them - add a signer.ts function instead.",
+            },
+            {
+              group: ["**/kohakuSession"],
+              importNamePattern: "^setKohakuSession$",
+              message:
+                "setKohakuSession installs the privacy root secret. Only src/lib/signer.ts may call it.",
             },
           ],
         },

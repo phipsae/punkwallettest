@@ -340,6 +340,56 @@ export async function sendETH(
   }
 }
 
+// Send a raw prepared transaction (to + calldata + value). Used by the
+// Kohaku privacy flows for ERC-20 approves, shield transactions, and
+// self-broadcast of proved private operations. Same shape as sendETH.
+export async function sendRawTx(
+  account: PrivateKeyAccount,
+  tx: { to: `0x${string}`; data: `0x${string}`; value: bigint },
+  networkId: string = DEFAULT_NETWORK,
+  options?: { waitForReceipt?: boolean }
+): Promise<TransactionResult> {
+  const walletClient = createWalletClientForNetwork(account, networkId);
+  const publicClient = createPublicClientForNetwork(networkId);
+
+  try {
+    const gasEstimate = await publicClient.estimateGas({
+      account: account.address,
+      to: tx.to,
+      data: tx.data,
+      value: tx.value,
+    });
+
+    const networks = getAllNetworks();
+    const chain = networks[networkId] || networks[DEFAULT_NETWORK];
+
+    const hash = await walletClient.sendTransaction({
+      account,
+      chain,
+      to: tx.to,
+      data: tx.data,
+      value: tx.value,
+      gas: gasEstimate,
+    });
+
+    if (options?.waitForReceipt) {
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        return { hash, success: false, error: "Transaction reverted" };
+      }
+    }
+
+    return { hash, success: true };
+  } catch (error) {
+    console.error("Transaction failed:", error);
+    return {
+      hash: "0x0" as `0x${string}`,
+      success: false,
+      error: error instanceof Error ? error.message : "Transaction failed",
+    };
+  }
+}
+
 // Validate Ethereum address
 export function isValidAddress(address: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(address);

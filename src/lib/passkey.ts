@@ -153,6 +153,26 @@ const PRF_SALT = new TextEncoder().encode(
 const EOA_HKDF_INFO = new TextEncoder().encode("PunkWallet-EOA-v2");
 const ENC_HKDF_INFO = new TextEncoder().encode("PunkWallet-Import-Encryption-v2");
 
+// Root secret for the Kohaku privacy plugins (Railgun etc.). Independent of
+// the EOA key by HKDF info separation - never change these strings, the
+// user's shielded balances derive from them. Imported wallets derive from
+// their EOA key instead of PRF so that re-importing the same key on another
+// device recovers the same shielded accounts.
+const KOHAKU_ROOT_INFO = new TextEncoder().encode("PunkWallet-Kohaku-Root-v1");
+const KOHAKU_ROOT_IMPORTED_INFO = new TextEncoder().encode(
+  "PunkWallet-Kohaku-Root-Imported-v1"
+);
+
+// Minimal hex-to-bytes for 0x-prefixed keys (avoids pulling viem utils here)
+function hexKeyToBytes(hex: `0x${string}`): Uint8Array {
+  const clean = hex.slice(2);
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
 // Extension object passed to every registration/authentication ceremony
 function prfExtensionInput(): WebAuthnExtensions {
   return { prf: { eval: { first: PRF_SALT } } } as unknown as WebAuthnExtensions;
@@ -463,6 +483,10 @@ async function withKeyForCredential<T>(
   fn: (key: {
     privateKey: `0x${string}`;
     address: `0x${string}`;
+    // Derives the Kohaku privacy root secret. Valid ONLY while fn runs -
+    // the closure is disarmed in the same finally that wipes the PRF secret.
+    // Callers own the returned bytes and must wipe them when done.
+    deriveKohakuRoot: () => Uint8Array;
   }) => Promise<T>
 ): Promise<T> {
   const imported = await isImportedCredential(
@@ -471,6 +495,7 @@ async function withKeyForCredential<T>(
   );
   assertRpIdMatchesStored(opts.credentialId);
   const { prfSecret } = await authenticateForPrf(opts.credentialId);
+  let boundaryOpen = true;
   try {
     const resolved = await resolveKeyForCredential(
       opts.credentialId,
@@ -478,8 +503,25 @@ async function withKeyForCredential<T>(
       imported,
       opts.expectedAddress
     );
-    return await fn(resolved);
+    const deriveKohakuRoot = (): Uint8Array => {
+      if (!boundaryOpen) {
+        throw new Error(
+          "deriveKohakuRoot called outside the passkey ceremony boundary."
+        );
+      }
+      if (imported) {
+        const keyBytes = hexKeyToBytes(resolved.privateKey);
+        try {
+          return hkdf(sha256, keyBytes, undefined, KOHAKU_ROOT_IMPORTED_INFO, 32);
+        } finally {
+          keyBytes.fill(0);
+        }
+      }
+      return hkdf(sha256, prfSecret, undefined, KOHAKU_ROOT_INFO, 32);
+    };
+    return await fn({ ...resolved, deriveKohakuRoot });
   } finally {
+    boundaryOpen = false;
     prfSecret.fill(0);
   }
 }
@@ -505,6 +547,35 @@ export async function unsafeWithSessionKey<T>(
       expectedAddress: target.address,
     },
     ({ privateKey, address }) => fn(privateKey, address)
+  );
+}
+
+/**
+ * Like unsafeWithSessionKey but additionally exposes deriveKohakuRoot so the
+ * signer can hand the privacy root secret to the Kohaku session module. Same
+ * rules and same ONLY sanctioned importer, src/lib/signer.ts (enforced via
+ * no-restricted-imports in eslint.config.mjs). The derived root must go
+ * straight into the kohakuSession module, never React state.
+ */
+export async function unsafeWithSessionSecrets<T>(
+  target: {
+    credentialId: string;
+    isImported?: boolean;
+    address?: `0x${string}`;
+  },
+  fn: (key: {
+    privateKey: `0x${string}`;
+    address: `0x${string}`;
+    deriveKohakuRoot: () => Uint8Array;
+  }) => Promise<T>
+): Promise<T> {
+  return withKeyForCredential(
+    {
+      credentialId: target.credentialId,
+      isImportedHint: target.isImported,
+      expectedAddress: target.address,
+    },
+    fn
   );
 }
 
@@ -599,7 +670,11 @@ export async function createWalletWithPasskey(
 // wallet info - no key material. Cancelled prompts return null to preserve
 // the existing unlock UX; decryption, integrity, and PRF-support errors
 // deliberately throw so the UI shows the real reason.
-export async function unlockCurrentWallet(): Promise<PublicWalletInfo | null> {
+export async function unlockCurrentWallet(options?: {
+  // Invoked inside the unlock ceremony so app-open auth doubles as privacy-
+  // key derivation (no extra biometric prompt). Receiver owns the bytes.
+  onKohakuRoot?: (root: Uint8Array) => void;
+}): Promise<PublicWalletInfo | null> {
   const stored = localStorage.getItem(CREDENTIAL_STORAGE_KEY);
   if (!stored) {
     return null;
@@ -622,7 +697,10 @@ export async function unlockCurrentWallet(): Promise<PublicWalletInfo | null> {
         isImportedHint: imported,
         expectedAddress: storedWallet?.address,
       },
-      async (key) => key.address
+      async (key) => {
+        options?.onKohakuRoot?.(key.deriveKohakuRoot());
+        return key.address;
+      }
     );
   } catch (error) {
     if (error instanceof UserCancelledError) return null;
@@ -816,7 +894,11 @@ export async function recoverWalletInfo(): Promise<{
 // ceremony either way). Returns only public wallet info, no key material.
 // Cancelled prompts return null; integrity/decryption errors throw.
 export async function unlockWallet(
-  storedWallet: StoredWallet
+  storedWallet: StoredWallet,
+  options?: {
+    // Same contract as unlockCurrentWallet's hook
+    onKohakuRoot?: (root: Uint8Array) => void;
+  }
 ): Promise<PublicWalletInfo | null> {
   const imported = await isImportedCredential(
     storedWallet.credentialId,
@@ -831,7 +913,10 @@ export async function unlockWallet(
         isImportedHint: imported,
         expectedAddress: storedWallet.address,
       },
-      async (key) => key.address
+      async (key) => {
+        options?.onKohakuRoot?.(key.deriveKohakuRoot());
+        return key.address;
+      }
     );
   } catch (error) {
     if (error instanceof UserCancelledError) return null;
