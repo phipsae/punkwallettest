@@ -256,6 +256,31 @@ export function createPublicClientForNetwork(
   });
 }
 
+// RPC endpoint for privacy note-scanning. The Kohaku plugins query eth_getLogs
+// over wide block ranges, which Alchemy's free tier rejects (10-block cap).
+// Use NEXT_PUBLIC_PRIVACY_RPC_URL when set, otherwise a log-friendly public
+// node on Sepolia, otherwise the normal RPC.
+function getPrivacyRpcUrl(networkId: string): string {
+  const override = process.env.NEXT_PUBLIC_PRIVACY_RPC_URL;
+  if (override) return override;
+  if (networkId === "sepolia") {
+    return "https://ethereum-sepolia-rpc.publicnode.com";
+  }
+  return getRpcUrl(networkId);
+}
+
+// Public client used by the privacy plugins' sync (wider getLogs allowance)
+export function createPrivacyPublicClientForNetwork(
+  networkId: string = DEFAULT_NETWORK
+): PublicClient {
+  const networks = getAllNetworks();
+  const chain = networks[networkId] || networks[DEFAULT_NETWORK];
+  return createPublicClient({
+    chain,
+    transport: http(getPrivacyRpcUrl(networkId)),
+  });
+}
+
 // Create wallet client for signing transactions. Takes a viem account, not a
 // raw private key - key material stays behind the signer boundary (signer.ts).
 export function createWalletClientForNetwork(

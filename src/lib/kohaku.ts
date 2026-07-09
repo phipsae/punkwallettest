@@ -25,6 +25,7 @@ import type { PPv1Instance, PPv1Broadcaster } from "@kohaku-eth/privacy-pools";
 const E_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 import {
   createPublicClientForNetwork,
+  createPrivacyPublicClientForNetwork,
   getAllNetworks,
 } from "./wallet";
 import { getTokensForNetwork, type Token } from "./tokens";
@@ -300,7 +301,8 @@ function buildHost(
   // A verified (light-client) provider to use instead of the plain viem one
   verifiedProvider?: unknown | null
 ): Host {
-  const publicClient = createPublicClientForNetwork(networkId);
+  // Privacy sync does wide eth_getLogs; use the log-friendly RPC client
+  const publicClient = createPrivacyPublicClientForNetwork(networkId);
   return {
     network: {
       fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
