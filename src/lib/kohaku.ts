@@ -259,6 +259,22 @@ let initPromise: Promise<RegistryState> | null = null;
 let idbAvailable: boolean | null = null;
 let lastInitError: string | null = null;
 
+// The plugins wrap wasm-bindgen objects (Railgun especially) that panic with
+// "recursive use of an object" if two async methods run on the same instance
+// concurrently. React dev double-invokes effects and balance() syncs
+// internally, so overlaps are easy to hit. Serialize every plugin call
+// through one queue.
+let opQueue: Promise<unknown> = Promise.resolve();
+function withPluginLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = opQueue.then(fn, fn);
+  // Keep the chain alive regardless of individual failures
+  opQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 export function resetPrivacy(): void {
   state = null;
   initPromise = null;
@@ -495,7 +511,7 @@ const POI_PENDING_LABELS: Record<string, string> = {
   ShieldBlocked: "blocked by proof of innocence",
 };
 
-export async function getPrivateBalances(): Promise<PrivateBalanceRow[]> {
+async function getPrivateBalancesImpl(): Promise<PrivateBalanceRow[]> {
   const s = requireState();
   const rows: PrivateBalanceRow[] = [];
 
@@ -582,7 +598,7 @@ export async function getPrivateBalances(): Promise<PrivateBalanceRow[]> {
 }
 
 // The 0zk receive address for the wallet's Railgun account
-export async function getRailgunAddress(): Promise<string | null> {
+async function getRailgunAddressImpl(): Promise<string | null> {
   const s = requireState();
   if (!s.railgun) return null;
   return s.railgun.instanceId();
@@ -591,7 +607,7 @@ export async function getRailgunAddress(): Promise<string | null> {
 // ---------------------------------------------------------------------------
 // Shield
 
-export async function prepareShield(
+async function prepareShieldImpl(
   protocol: ProtocolId,
   args: {
     // null = native ETH
@@ -708,7 +724,7 @@ export async function prepareShield(
 // the EOA that submits it pays gas and is visible on-chain, which is fine
 // when withdrawing to yourself)
 
-export async function prepareUnshield(
+async function prepareUnshieldImpl(
   protocol: ProtocolId,
   args: {
     contract: `0x${string}` | null;
@@ -921,7 +937,7 @@ class Eip1193Adapter {
 let pendingTransferOp: unknown = null;
 
 // Prove a private transfer. No key needed. Stores the proved op for broadcast.
-export async function prepareRailgunPrivateTransfer(args: {
+async function prepareRailgunPrivateTransferImpl(args: {
   to0zk: string;
   contract: `0x${string}` | null;
   amount: bigint;
@@ -943,7 +959,7 @@ export async function prepareRailgunPrivateTransfer(args: {
 // authorizes the fee UserOperation; it is used to build a WASM Signer that is
 // freed, and detached from the plugin, immediately after. Called ONLY from
 // signer.ts inside a passkey ceremony.
-export async function broadcastRailgunPrivateTransfer(
+async function broadcastRailgunPrivateTransferImpl(
   ownerAddress: `0x${string}`,
   privateKey: `0x${string}`
 ): Promise<void> {
@@ -989,7 +1005,7 @@ export async function broadcastRailgunPrivateTransfer(
 // Ragequit (Privacy Pools only): reclaim a deposit the ASP never approved.
 // Public, self-broadcast, de-anonymizing.
 
-export async function prepareRagequit(
+async function prepareRagequitImpl(
   labels: unknown[]
 ): Promise<PreparedRagequit> {
   const s = requireState();
@@ -1006,4 +1022,50 @@ export async function prepareRagequit(
       value: tx.value,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Public API: every plugin-touching call is serialized through withPluginLock
+// so overlapping calls never re-enter a wasm-bindgen object concurrently.
+
+export function getPrivateBalances(): Promise<PrivateBalanceRow[]> {
+  return withPluginLock(getPrivateBalancesImpl);
+}
+export function getRailgunAddress(): Promise<string | null> {
+  return withPluginLock(getRailgunAddressImpl);
+}
+export function prepareShield(
+  protocol: ProtocolId,
+  args: { contract: `0x${string}` | null; amount: bigint; owner: `0x${string}` }
+): Promise<PreparedShield> {
+  return withPluginLock(() => prepareShieldImpl(protocol, args));
+}
+export function prepareUnshield(
+  protocol: ProtocolId,
+  args: {
+    contract: `0x${string}` | null;
+    amount: bigint;
+    to: `0x${string}`;
+    isOwnAddress: boolean;
+  }
+): Promise<PreparedUnshield> {
+  return withPluginLock(() => prepareUnshieldImpl(protocol, args));
+}
+export function prepareRailgunPrivateTransfer(args: {
+  to0zk: string;
+  contract: `0x${string}` | null;
+  amount: bigint;
+}): Promise<void> {
+  return withPluginLock(() => prepareRailgunPrivateTransferImpl(args));
+}
+export function broadcastRailgunPrivateTransfer(
+  ownerAddress: `0x${string}`,
+  privateKey: `0x${string}`
+): Promise<void> {
+  return withPluginLock(() =>
+    broadcastRailgunPrivateTransferImpl(ownerAddress, privateKey)
+  );
+}
+export function prepareRagequit(labels: unknown[]): Promise<PreparedRagequit> {
+  return withPluginLock(() => prepareRagequitImpl(labels));
 }
