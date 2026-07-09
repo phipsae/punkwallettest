@@ -517,82 +517,98 @@ async function getPrivateBalancesImpl(): Promise<PrivateBalanceRow[]> {
   const s = requireState();
   const rows: PrivateBalanceRow[] = [];
 
+  // Per-protocol try/catch: one protocol's sync failing (e.g. PP/Tornado
+  // log-scan hitting an RPC's archive limit) must not hide the others'
+  // balances (notably Railgun, which syncs via Subsquid, not eth_getLogs).
+
   if (s.railgun) {
-    const balances = await s.railgun.balance(undefined);
-    // Merge per asset: Valid = spendable, everything else pending
-    const merged = new Map<string, PrivateBalanceRow>();
-    for (const b of balances) {
-      if (b.asset.__type !== "erc20") continue;
-      const desc = describeAsset(
-        b.asset.contract as `0x${string}`,
-        s.railgunWrappedBase,
-        s.networkId
-      );
-      const key = desc.contract ?? "native";
-      const row =
-        merged.get(key) ??
-        ({
-          protocol: "railgun",
-          ...desc,
-          spendable: BigInt(0),
-          pending: BigInt(0),
-        } as PrivateBalanceRow);
-      if (b.tag === "Valid" || b.tag === undefined) {
-        row.spendable += b.amount;
-      } else {
-        row.pending += b.amount;
-        row.pendingLabel = POI_PENDING_LABELS[b.tag] ?? b.tag;
+    try {
+      const balances = await s.railgun.balance(undefined);
+      // Merge per asset: Valid = spendable, everything else pending
+      const merged = new Map<string, PrivateBalanceRow>();
+      for (const b of balances) {
+        if (b.asset.__type !== "erc20") continue;
+        const desc = describeAsset(
+          b.asset.contract as `0x${string}`,
+          s.railgunWrappedBase,
+          s.networkId
+        );
+        const key = desc.contract ?? "native";
+        const row =
+          merged.get(key) ??
+          ({
+            protocol: "railgun",
+            ...desc,
+            spendable: BigInt(0),
+            pending: BigInt(0),
+          } as PrivateBalanceRow);
+        if (b.tag === "Valid" || b.tag === undefined) {
+          row.spendable += b.amount;
+        } else {
+          row.pending += b.amount;
+          row.pendingLabel = POI_PENDING_LABELS[b.tag] ?? b.tag;
+        }
+        merged.set(key, row);
       }
-      merged.set(key, row);
+      rows.push(...merged.values());
+    } catch (e) {
+      console.error("Railgun balance sync failed", e);
     }
-    rows.push(...merged.values());
   }
 
   if (s.privacyPools) {
-    // PP balance returns approved (spendable) + a 'pending' tag per asset
-    const balances = await s.privacyPools.balance(undefined);
-    const merged = new Map<string, PrivateBalanceRow>();
-    for (const b of balances) {
-      const desc = describeAsset(
-        b.asset.contract as `0x${string}`,
-        null,
-        s.networkId
-      );
-      const key = desc.contract ?? "native";
-      const row =
-        merged.get(key) ??
-        ({
-          protocol: "privacy-pools",
-          ...desc,
-          spendable: BigInt(0),
-          pending: BigInt(0),
-        } as PrivateBalanceRow);
-      if (b.tag === "pending") {
-        row.pending += b.amount;
-        row.pendingLabel = "awaiting ASP approval";
-      } else {
-        row.spendable += b.amount;
+    try {
+      // PP balance returns approved (spendable) + a 'pending' tag per asset
+      const balances = await s.privacyPools.balance(undefined);
+      const merged = new Map<string, PrivateBalanceRow>();
+      for (const b of balances) {
+        const desc = describeAsset(
+          b.asset.contract as `0x${string}`,
+          null,
+          s.networkId
+        );
+        const key = desc.contract ?? "native";
+        const row =
+          merged.get(key) ??
+          ({
+            protocol: "privacy-pools",
+            ...desc,
+            spendable: BigInt(0),
+            pending: BigInt(0),
+          } as PrivateBalanceRow);
+        if (b.tag === "pending") {
+          row.pending += b.amount;
+          row.pendingLabel = "awaiting ASP approval";
+        } else {
+          row.spendable += b.amount;
+        }
+        merged.set(key, row);
       }
-      merged.set(key, row);
+      rows.push(...merged.values());
+    } catch (e) {
+      console.error("Privacy Pools balance sync failed", e);
     }
-    rows.push(...merged.values());
   }
 
   if (s.tornado) {
-    // Tornado holds fixed-denomination notes; report the total plus a note
-    // count. All notes here are native ETH pools in our config.
-    const notes = await s.tornado.plugin.notes({ includeSpent: false });
-    const total = notes.reduce((sum, n) => sum + n.amount, BigInt(0));
-    if (notes.length > 0) {
-      rows.push({
-        protocol: "tornado",
-        symbol: "ETH",
-        decimals: 18,
-        contract: null,
-        spendable: total,
-        pending: BigInt(0),
-        noteCount: notes.length,
-      });
+    try {
+      // Tornado holds fixed-denomination notes; report the total plus a note
+      // count. All notes here are native ETH pools in our config.
+      const notes = await s.tornado.plugin.notes({ includeSpent: false });
+      const total = notes.reduce((sum, n) => sum + n.amount, BigInt(0));
+      if (notes.length > 0) {
+        rows.push({
+          protocol: "tornado",
+          symbol: "ETH",
+          decimals: 18,
+          contract: null,
+          spendable: total,
+          pending: BigInt(0),
+          noteCount: notes.length,
+        });
+      }
+    } catch (e) {
+      console.error("Tornado balance sync failed", e);
     }
   }
 

@@ -256,17 +256,13 @@ export function createPublicClientForNetwork(
   });
 }
 
-// RPC endpoint for privacy note-scanning. The Kohaku plugins query eth_getLogs
-// over wide block ranges, which Alchemy's free tier rejects (10-block cap).
-// Use NEXT_PUBLIC_PRIVACY_RPC_URL when set, otherwise a log-friendly public
-// node on Sepolia, otherwise the normal RPC.
+// RPC endpoint for privacy note-scanning. Privacy Pools and Tornado query
+// eth_getLogs over wide (archive) block ranges, which most free RPCs reject
+// (Alchemy free caps at 10 blocks; public nodes need an archive token).
+// Railgun is unaffected (it syncs via Subsquid). Set NEXT_PUBLIC_PRIVACY_RPC_URL
+// to an archive-capable endpoint to make PP/Tornado sync work.
 function getPrivacyRpcUrl(networkId: string): string {
-  const override = process.env.NEXT_PUBLIC_PRIVACY_RPC_URL;
-  if (override) return override;
-  if (networkId === "sepolia") {
-    return "https://ethereum-sepolia-rpc.publicnode.com";
-  }
-  return getRpcUrl(networkId);
+  return process.env.NEXT_PUBLIC_PRIVACY_RPC_URL || getRpcUrl(networkId);
 }
 
 // Public client used by the privacy plugins' sync (wider getLogs allowance)
