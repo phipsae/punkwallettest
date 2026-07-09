@@ -58,7 +58,11 @@ export function isRailgunPrivateSendAvailable(): boolean {
 export const PRIVACY_SUPPORTED_CHAIN_IDS = [1, 11155111];
 
 export function getAvailableProtocols(): ProtocolId[] {
-  return ["railgun", "privacy-pools"];
+  const protocols: ProtocolId[] = ["railgun"];
+  // Privacy Pools scans events over wide archive block ranges, which needs an
+  // archive-capable RPC. Without one it only errors, so don't offer it.
+  if (process.env.NEXT_PUBLIC_PRIVACY_RPC_URL) protocols.push("privacy-pools");
+  return protocols;
 }
 
 export function getChainIdForNetwork(networkId: string): number | null {
@@ -311,7 +315,10 @@ export async function initPrivacy(
         }
       }
 
-      if (enabled.includes("privacy-pools")) {
+      if (
+        enabled.includes("privacy-pools") &&
+        process.env.NEXT_PUBLIC_PRIVACY_RPC_URL
+      ) {
         try {
           const {
             createPPv1Plugin,
