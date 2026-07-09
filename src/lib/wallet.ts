@@ -12,7 +12,7 @@ import {
 import { normalize } from "viem/ens";
 import type { PrivateKeyAccount } from "viem/accounts";
 import { safeImageUrl } from "./urlsafety";
-import { mainnet, arbitrum, base, optimism, linea, zkSync, polygon } from "viem/chains";
+import { mainnet, arbitrum, base, optimism, linea, zkSync, polygon, sepolia } from "viem/chains";
 
 // Custom network interface for user-added networks
 export interface CustomNetwork {
@@ -28,6 +28,10 @@ export interface CustomNetwork {
 // Local storage key for custom networks
 const CUSTOM_NETWORKS_KEY = "punk_wallet_custom_networks";
 
+// Dev-only testnet toggle (Sepolia is where the Kohaku privacy plugins
+// are exercised before mainnet)
+const ENABLE_TESTNETS = process.env.NEXT_PUBLIC_ENABLE_TESTNETS === "true";
+
 // Default supported networks
 export const DEFAULT_NETWORKS: Record<string, Chain> = {
   mainnet,
@@ -37,6 +41,7 @@ export const DEFAULT_NETWORKS: Record<string, Chain> = {
   linea,
   zksync: zkSync,
   polygon,
+  ...(ENABLE_TESTNETS ? { sepolia } : {}),
 };
 
 // Default to Base
@@ -54,6 +59,7 @@ const DEFAULT_RPC_URLS: Record<string, string> = {
   linea: `https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   zksync: `https://zksync-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   polygon: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  sepolia: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
 };
 
 // Get custom networks from local storage
@@ -354,6 +360,7 @@ const DEFAULT_EXPLORERS: Record<string, string> = {
   linea: "https://lineascan.build",
   zksync: "https://explorer.zksync.io",
   polygon: "https://polygonscan.com",
+  sepolia: "https://sepolia.etherscan.io",
 };
 
 // Get explorer base URL for a network

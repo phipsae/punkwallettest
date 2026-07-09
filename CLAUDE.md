@@ -19,6 +19,13 @@ Requires a `.env.local` (gitignored) with:
 - `NEXT_PUBLIC_ALCHEMY_API_KEY` (all default RPC URLs are Alchemy endpoints)
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
 
+Optional (Kohaku privacy features). All `NEXT_PUBLIC_` values are baked into the static export and ship to every client, so only rate-limited/public keys belong here:
+
+- `NEXT_PUBLIC_ENABLE_TESTNETS=true` adds Sepolia to the network list (dev testing of the privacy plugins)
+- `NEXT_PUBLIC_ENABLE_TORNADO=false` removes the Tornado Cash plugin from the build entirely
+- `NEXT_PUBLIC_TORNADO_IOS=true` shows Tornado inside the Capacitor/native build (default hidden, App Store review risk)
+- `NEXT_PUBLIC_PIMLICO_API_KEY` 4337 bundler key for private Railgun transfers (Phase 3)
+
 ## Architecture
 
 Punk Wallet is a self-custodial Ethereum wallet secured by passkeys (no seed phrases). It is a Next.js 16 App Router app configured with `output: 'export'` in `next.config.ts`, so it is a fully static, client-only site. There is no server code, and the same build runs on Vercel (web) and inside a Capacitor shell (iOS). Never add server components, API routes, or anything else that breaks static export.

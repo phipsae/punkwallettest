@@ -14,8 +14,11 @@ import "./globals.css";
 //   and no unsafe-eval.
 // - connect-src https: wss:: user-added custom RPC URLs are arbitrary, so
 //   origins cannot be enumerated. Still blocks http: exfil and downgrades.
+// - script-src 'wasm-unsafe-eval': required to instantiate the Kohaku
+//   zk-prover WebAssembly (Railgun/Privacy Pools). Scoped to wasm only;
+//   JS eval stays blocked.
 const CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-geist-sans",
