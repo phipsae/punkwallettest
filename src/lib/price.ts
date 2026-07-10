@@ -101,7 +101,9 @@ export async function getETHPrice(): Promise<number> {
     console.log(`ETH price: $${price.toFixed(2)} (tick: ${tick})`);
     return price;
   } catch (error) {
-    console.error("Failed to get ETH price:", error);
+    // Non-fatal: price is cosmetic and we fall back to cached/0. Use warn so
+    // a transient RPC hiccup does not trip the Next dev error overlay.
+    console.warn("Failed to get ETH price:", error);
 
     // Return cached price if available
     if (priceCache["eth"]) return priceCache["eth"].price;
@@ -188,7 +190,7 @@ export async function getPOLPrice(): Promise<number> {
     console.log(`POL price: $${price.toFixed(4)} (tick: ${tick}, ETH: $${ethPrice.toFixed(2)})`);
     return price;
   } catch (error) {
-    console.error("Failed to get POL price:", error);
+    console.warn("Failed to get POL price:", error);
 
     // Return cached price if available
     if (priceCache["pol"]) return priceCache["pol"].price;
