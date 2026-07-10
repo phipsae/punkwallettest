@@ -16,6 +16,7 @@ import {
   unsafeWithSessionSecrets,
   unlockCurrentWallet,
   unlockWallet,
+  createDerivedAccount as createDerivedAccountImpl,
   type PublicWalletInfo,
   type StoredWallet,
 } from "./passkey";
@@ -23,14 +24,18 @@ import { sendETH, sendRawTx, type TransactionResult } from "./wallet";
 import { sendToken, type Token } from "./tokens";
 import { executeSessionRequest, type SessionRequest } from "./walletconnect";
 import { setKohakuSession, isPrivacyEnabled } from "./kohakuSession";
-import { broadcastRailgunPrivateTransfer } from "./kohaku";
+import {
+  broadcastRailgunPrivateTransfer,
+  prepareRailgunUnshieldRelayed,
+  broadcastRailgunUnshield,
+} from "./kohaku";
 
 // The minimum a signer call needs to know about the wallet. address is used
 // as an integrity check: the ceremony-derived key must match it or the call
 // fails loudly before signing anything.
 export type SignerTarget = Pick<
   PublicWalletInfo,
-  "credentialId" | "address" | "isImported"
+  "credentialId" | "address" | "isImported" | "index"
 >;
 
 // App open / account selection. One ceremony, address verification, no key
@@ -62,6 +67,15 @@ export async function unlockIdentityFor(
         }
       : undefined
   );
+}
+
+// Derive a new HD account under the current passkey (one ceremony). Returns
+// public info only. Used to mint clean private-unshield destinations.
+export async function createDerivedAccount(
+  credentialId: string,
+  username?: string
+): Promise<PublicWalletInfo | null> {
+  return createDerivedAccountImpl(credentialId, username);
 }
 
 // First-time privacy opt-in mid-session: one dedicated ceremony that derives
@@ -174,6 +188,26 @@ export async function broadcastPrivateTransfer(
 ): Promise<void> {
   return unsafeWithSessionKey(wallet, async (privateKey, address) => {
     await broadcastRailgunPrivateTransfer(address, privateKey);
+  });
+}
+
+// Unshield privately to a fresh derived account. The proof binds the unshield
+// to `destTarget`'s address (keyless), then that same fresh account signs the
+// relayed 4337 UserOp inside one ceremony, so the depositing EOA never appears
+// on-chain and the destination needs no ETH (privacy paymaster pays gas from
+// shielded funds). `destTarget` is the derived clean account (with its index).
+export async function unshieldToCleanAccount(args: {
+  destTarget: SignerTarget;
+  contract: `0x${string}` | null;
+  amount: bigint;
+}): Promise<void> {
+  await prepareRailgunUnshieldRelayed({
+    contract: args.contract,
+    amount: args.amount,
+    to: args.destTarget.address as `0x${string}`,
+  });
+  return unsafeWithSessionKey(args.destTarget, async (privateKey, address) => {
+    await broadcastRailgunUnshield(address, privateKey);
   });
 }
 

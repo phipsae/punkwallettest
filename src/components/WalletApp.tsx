@@ -26,6 +26,7 @@ import {
   signAndSendToken,
   approveWalletConnectRequest,
   exportPrivateKey,
+  createDerivedAccount,
 } from "@/lib/signer";
 import PunkAvatar, { PunkBlockie } from "./PunkAvatar";
 import dynamic from "next/dynamic";
@@ -1051,6 +1052,29 @@ export default function WalletApp() {
     } finally {
       setLoading(false);
       setSelectedWalletIndex(null);
+    }
+  };
+
+  // Derive a fresh "clean" account under the current passkey (one prompt).
+  // Used as an unlinkable destination for private unshields.
+  const handleCreateCleanAccount = async () => {
+    if (!wallet) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createDerivedAccount(wallet.credentialId);
+      if (created) {
+        setStoredWallets(getStoredWallets());
+        setSuccess(`Clean account created (${formatAddress(created.address)})`);
+        setTimeout(() => setSuccess(null), 3000);
+      }
+    } catch (err) {
+      if (err instanceof UserCancelledError) return;
+      setError(
+        err instanceof Error ? err.message : "Failed to create account"
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -4599,7 +4623,7 @@ export default function WalletApp() {
                         const ensData = getENSAvatarForDisplay(w.address);
                         return (
                           <div
-                            key={w.credentialId}
+                            key={`${w.credentialId}:${w.index ?? 0}`}
                             className="p-4 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
                           >
                             <div className="flex items-center gap-3">
@@ -4721,6 +4745,19 @@ export default function WalletApp() {
 
               {/* Actions */}
               <div className="space-y-2 pt-4 border-t border-card-border">
+                {wallet && !wallet.isImported && (
+                  <button
+                    onClick={() => {
+                      setShowAccountSwitcher(false);
+                      handleCreateCleanAccount();
+                    }}
+                    disabled={loading}
+                    className="w-full p-4 rounded-sm bg-punk-purple/15 border border-punk-purple/40 text-punk-purple hover:bg-punk-purple/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <span>🛡</span>
+                    Create clean account
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowAccountSwitcher(false);

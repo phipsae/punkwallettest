@@ -786,6 +786,7 @@ class Eip1193Adapter {
 }
 
 let pendingTransferOp: unknown = null;
+let pendingUnshieldOp: unknown = null;
 
 // Prove a private transfer. No key needed. Stores the proved op for broadcast.
 async function prepareRailgunPrivateTransferImpl(args: {
@@ -806,18 +807,39 @@ async function prepareRailgunPrivateTransferImpl(args: {
   );
 }
 
-// Broadcast the proved transfer via the 4337 bundler. The EOA private key
-// authorizes the fee UserOperation; it is used to build a WASM Signer that is
-// freed, and detached from the plugin, immediately after. Called ONLY from
-// signer.ts inside a passkey ceremony.
-async function broadcastRailgunPrivateTransferImpl(
+// Prove a relayed (clean) unshield to `to`. No key needed. Stores the proved
+// op for broadcast via the 4337 privacy paymaster.
+async function prepareRailgunUnshieldRelayedImpl(args: {
+  contract: `0x${string}` | null;
+  amount: bigint;
+  to: `0x${string}`;
+}): Promise<void> {
+  const s = requireState();
+  if (!s.railgun) throw new Error("Railgun is not available on this network.");
+  const asset =
+    args.contract === null
+      ? ({ __type: "native" } as const)
+      : ({ __type: "erc20", contract: args.contract } as const);
+  pendingUnshieldOp = await s.railgun.prepareUnshield(
+    { asset, amount: args.amount },
+    args.to
+  );
+}
+
+// Shared 4337 broadcast plumbing. The EOA private key authorizes the fee
+// UserOperation; it builds a WASM Signer that is freed, and detached from the
+// plugin, immediately after. Gas is paid by Railgun's privacy paymaster from
+// shielded funds, so `ownerAddress` needs no ETH. Called ONLY from signer.ts
+// inside a passkey ceremony.
+async function broadcastPendingOp(
+  op: unknown,
   ownerAddress: `0x${string}`,
   privateKey: `0x${string}`
 ): Promise<void> {
   const s = requireState();
   if (!s.railgun) throw new Error("Railgun is not available.");
-  if (!PIMLICO_API_KEY) throw new Error("No bundler configured for private send.");
-  if (!pendingTransferOp) throw new Error("No prepared transfer to broadcast.");
+  if (!PIMLICO_API_KEY) throw new Error("No bundler configured for relaying.");
+  if (!op) throw new Error("No prepared operation to broadcast.");
 
   const railgunModule = await import("@kohaku-eth/railgun");
   const publicClient = createPublicClientForNetwork(s.networkId);
@@ -843,12 +865,38 @@ async function broadcastRailgunPrivateTransferImpl(
   try {
     plugin.setBundler(bundler);
     plugin.setSmartAccount(smartAccount, signer);
-    await plugin.broadcast(pendingTransferOp);
+    await plugin.broadcast(op);
   } finally {
     // Detach and free the key-bearing signer immediately
     (signer as unknown as { free?: () => void }).free?.();
     plugin.setBundler(undefined);
+  }
+}
+
+async function broadcastRailgunPrivateTransferImpl(
+  ownerAddress: `0x${string}`,
+  privateKey: `0x${string}`
+): Promise<void> {
+  if (!pendingTransferOp) throw new Error("No prepared transfer to broadcast.");
+  try {
+    await broadcastPendingOp(pendingTransferOp, ownerAddress, privateKey);
+  } finally {
     pendingTransferOp = null;
+  }
+}
+
+// Broadcast the proved clean unshield. `ownerAddress`/`privateKey` are the
+// fresh destination account, which both receives the funds and signs the fee
+// UserOp, so the depositing EOA never appears on-chain.
+async function broadcastRailgunUnshieldImpl(
+  ownerAddress: `0x${string}`,
+  privateKey: `0x${string}`
+): Promise<void> {
+  if (!pendingUnshieldOp) throw new Error("No prepared unshield to broadcast.");
+  try {
+    await broadcastPendingOp(pendingUnshieldOp, ownerAddress, privateKey);
+  } finally {
+    pendingUnshieldOp = null;
   }
 }
 
@@ -916,6 +964,26 @@ export function broadcastRailgunPrivateTransfer(
   return withPluginLock(() =>
     broadcastRailgunPrivateTransferImpl(ownerAddress, privateKey)
   );
+}
+export function prepareRailgunUnshieldRelayed(args: {
+  contract: `0x${string}` | null;
+  amount: bigint;
+  to: `0x${string}`;
+}): Promise<void> {
+  return withPluginLock(() => prepareRailgunUnshieldRelayedImpl(args));
+}
+export function broadcastRailgunUnshield(
+  ownerAddress: `0x${string}`,
+  privateKey: `0x${string}`
+): Promise<void> {
+  return withPluginLock(() =>
+    broadcastRailgunUnshieldImpl(ownerAddress, privateKey)
+  );
+}
+// True when a relayed (unlinkable) unshield is possible: a bundler is
+// configured and the Railgun plugin is live.
+export function isRelayedUnshieldAvailable(): boolean {
+  return Boolean(PIMLICO_API_KEY) && state?.railgun != null;
 }
 export function prepareRagequit(labels: unknown[]): Promise<PreparedRagequit> {
   return withPluginLock(() => prepareRagequitImpl(labels));

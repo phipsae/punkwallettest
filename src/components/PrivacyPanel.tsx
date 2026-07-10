@@ -8,12 +8,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { QRCodeSVG } from "qrcode.react";
-import type { PublicWalletInfo } from "@/lib/passkey";
-import { UserCancelledError } from "@/lib/passkey";
+import type { PublicWalletInfo, StoredWallet } from "@/lib/passkey";
+import { UserCancelledError, getStoredWallets } from "@/lib/passkey";
 import {
   enableKohakuPrivacy,
   signAndSendBatch,
   broadcastPrivateTransfer,
+  unshieldToCleanAccount,
+  createDerivedAccount,
 } from "@/lib/signer";
 import { isValidAddress, formatAddress } from "@/lib/wallet";
 import {
@@ -24,6 +26,7 @@ import {
   prepareUnshield,
   prepareRailgunPrivateTransfer,
   isRailgunPrivateSendAvailable,
+  isRelayedUnshieldAvailable,
   isPrivacyReady,
   getPrivacyInitError,
   getAvailableProtocols,
@@ -89,6 +92,12 @@ export default function PrivacyPanel({
   const [shieldProtocol, setShieldProtocol] = useState<ProtocolId>("railgun");
   const [unshieldAmount, setUnshieldAmount] = useState("");
   const [unshieldTo, setUnshieldTo] = useState("");
+  // Destination mode for unshield: a fresh derived "clean" account (relayed,
+  // unlinkable) or a custom address (self-broadcast, links your EOA).
+  const [unshieldMode, setUnshieldMode] = useState<"clean" | "custom">(
+    isRelayedUnshieldAvailable() ? "clean" : "custom"
+  );
+  const [cleanDest, setCleanDest] = useState<StoredWallet | null>(null);
   const [sendAmount, setSendAmount] = useState("");
   const [sendTo0zk, setSendTo0zk] = useState("");
   const [activeRow, setActiveRow] = useState<PrivateBalanceRow | null>(null);
@@ -98,6 +107,19 @@ export default function PrivacyPanel({
 
   const enabled = isPrivacyEnabled(wallet.credentialId);
   const unlocked = isKohakuUnlocked(wallet.credentialId);
+
+  // Fresh derived accounts (index > 0) under this passkey, usable as clean
+  // unshield destinations.
+  const [cleanAccounts, setCleanAccounts] = useState<StoredWallet[]>([]);
+  const refreshCleanAccounts = useCallback(() => {
+    const list = getStoredWallets().filter(
+      (w) =>
+        w.credentialId === wallet.credentialId && (w.index ?? 0) > 0 && !w.isImported
+    );
+    setCleanAccounts(list);
+    setCleanDest((prev) => prev ?? list[0] ?? null);
+  }, [wallet.credentialId]);
+  useEffect(() => refreshCleanAccounts(), [refreshCleanAccounts]);
 
   useEffect(() => onVerifiedStatus(setVerifiedStatusState), []);
 
@@ -223,16 +245,30 @@ export default function PrivacyPanel({
     }
   }, [activeRow, shieldAmount, shieldProtocol, wallet, network, onError, onSuccess, refreshBalances]);
 
+  const handleCreateCleanDest = useCallback(async () => {
+    setBusy(true);
+    try {
+      const created = await createDerivedAccount(wallet.credentialId);
+      if (created) {
+        refreshCleanAccounts();
+        const fresh = getStoredWallets().find(
+          (w) => w.address === created.address
+        );
+        if (fresh) setCleanDest(fresh);
+        onSuccess(`Clean account created (${formatAddress(created.address)})`);
+      }
+    } catch (err) {
+      if (err instanceof UserCancelledError) return;
+      onError(err instanceof Error ? err.message : "Failed to create account.");
+    } finally {
+      setBusy(false);
+    }
+  }, [wallet.credentialId, refreshCleanAccounts, onError, onSuccess]);
+
   const handleUnshield = useCallback(async () => {
     const row = activeRow;
     if (!row) {
       onError("Select a balance to unshield.");
-      return;
-    }
-    const destination =
-      unshieldTo.trim() === "" ? wallet.address : unshieldTo.trim();
-    if (!isValidAddress(destination)) {
-      onError("Invalid destination address.");
       return;
     }
     let amount: bigint;
@@ -244,6 +280,55 @@ export default function PrivacyPanel({
     }
     if (amount <= BigInt(0) || amount > row.spendable) {
       onError("Amount exceeds your spendable private balance.");
+      return;
+    }
+
+    // Clean mode (Railgun only): relayed unshield to a fresh derived account
+    // via the 4337 privacy paymaster. Unlinkable, and the destination needs
+    // no ETH.
+    if (unshieldMode === "clean" && row.protocol === "railgun") {
+      if (!isRelayedUnshieldAvailable()) {
+        onError("Relayed unshield needs a bundler key (NEXT_PUBLIC_PIMLICO_API_KEY).");
+        return;
+      }
+      if (!cleanDest) {
+        onError("Create or pick a clean account first.");
+        return;
+      }
+      setBusy(true);
+      setProving(true);
+      try {
+        await unshieldToCleanAccount({
+          destTarget: {
+            credentialId: cleanDest.credentialId,
+            address: cleanDest.address as `0x${string}`,
+            isImported: cleanDest.isImported ?? false,
+            index: cleanDest.index ?? 0,
+          },
+          contract: row.contract,
+          amount,
+        });
+        setProving(false);
+        onSuccess(`Unshielded privately to ${formatAddress(cleanDest.address)}.`);
+        setUnshieldAmount("");
+        setPanelView("overview");
+        refreshBalances();
+      } catch (err) {
+        if (err instanceof UserCancelledError) return;
+        onError(err instanceof Error ? err.message : "Unshield failed.");
+      } finally {
+        setBusy(false);
+        setProving(false);
+      }
+      return;
+    }
+
+    // Custom mode: self-broadcast to a pasted address (links your EOA), or the
+    // relayed path for protocols that always relay (Privacy Pools).
+    const destination =
+      unshieldTo.trim() === "" ? wallet.address : unshieldTo.trim();
+    if (!isValidAddress(destination)) {
+      onError("Invalid destination address.");
       return;
     }
     setBusy(true);
@@ -259,7 +344,6 @@ export default function PrivacyPanel({
       });
       setProving(false);
       if (prepared.relayed) {
-        // Relayed (Privacy Pools): the relayer submits, no EOA signing
         await prepared.relayed.broadcast();
       } else if (prepared.selfBroadcast) {
         const txs = [...prepared.selfBroadcast.txs];
@@ -270,6 +354,7 @@ export default function PrivacyPanel({
             credentialId: wallet.credentialId,
             address: wallet.address,
             isImported: wallet.isImported,
+            index: wallet.index,
           },
           txs,
           networkId: network,
@@ -291,7 +376,7 @@ export default function PrivacyPanel({
       setBusy(false);
       setProving(false);
     }
-  }, [activeRow, unshieldAmount, unshieldTo, wallet, network, onError, onSuccess, refreshBalances]);
+  }, [activeRow, unshieldAmount, unshieldTo, unshieldMode, cleanDest, wallet, network, onError, onSuccess, refreshBalances]);
 
   const handlePrivateSend = useCallback(async () => {
     const row = activeRow;
@@ -446,6 +531,13 @@ export default function PrivacyPanel({
         to={unshieldTo}
         setTo={setUnshieldTo}
         ownAddress={wallet.address}
+        mode={unshieldMode}
+        setMode={setUnshieldMode}
+        relayedAvailable={isRelayedUnshieldAvailable()}
+        cleanAccounts={cleanAccounts}
+        cleanDest={cleanDest}
+        setCleanDest={setCleanDest}
+        onCreateClean={handleCreateCleanDest}
         busy={busy}
         onSubmit={handleUnshield}
         onBack={() => setPanelView("overview")}
@@ -879,6 +971,13 @@ function UnshieldForm({
   to,
   setTo,
   ownAddress,
+  mode,
+  setMode,
+  relayedAvailable,
+  cleanAccounts,
+  cleanDest,
+  setCleanDest,
+  onCreateClean,
   busy,
   onSubmit,
   onBack,
@@ -891,14 +990,22 @@ function UnshieldForm({
   to: string;
   setTo: (v: string) => void;
   ownAddress: string;
+  mode: "clean" | "custom";
+  setMode: (m: "clean" | "custom") => void;
+  relayedAvailable: boolean;
+  cleanAccounts: StoredWallet[];
+  cleanDest: StoredWallet | null;
+  setCleanDest: (w: StoredWallet | null) => void;
+  onCreateClean: () => void;
   busy: boolean;
   onSubmit: () => void;
   onBack: () => void;
 }) {
+  const isRailgun = activeRow?.protocol === "railgun";
   return (
     <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Unshield to a public address</h3>
+        <h3 className="text-sm font-semibold">Unshield</h3>
         <button onClick={onBack} className="text-xs text-accent">
           Back
         </button>
@@ -933,18 +1040,89 @@ function UnshieldForm({
         placeholder={`Amount (${activeRow?.symbol ?? "ETH"})`}
         className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono"
       />
-      <input
-        type="text"
-        value={to}
-        onChange={(e) => setTo(e.target.value)}
-        placeholder={`Destination (default: your wallet ${formatAddress(ownAddress)})`}
-        className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
-      />
-      <p className="text-[11px] text-muted">
-        Railgun adds a 0.025% unshield fee on top so the recipient receives the
-        exact amount. Unshielding to your own address links it to this
-        withdrawal on-chain.
-      </p>
+
+      {/* Destination mode (Railgun only; Privacy Pools always relays) */}
+      {isRailgun && (
+        <div className="flex rounded-sm bg-input-bg border border-card-border p-1">
+          <button
+            onClick={() => setMode("clean")}
+            className={`flex-1 py-2 rounded-sm text-xs font-medium transition-colors ${
+              mode === "clean" ? "bg-punk-purple text-white" : "text-muted"
+            }`}
+          >
+            Clean account
+          </button>
+          <button
+            onClick={() => setMode("custom")}
+            className={`flex-1 py-2 rounded-sm text-xs font-medium transition-colors ${
+              mode === "custom" ? "bg-accent text-background" : "text-muted"
+            }`}
+          >
+            Custom address
+          </button>
+        </div>
+      )}
+
+      {isRailgun && mode === "clean" ? (
+        <div className="space-y-2">
+          {!relayedAvailable ? (
+            <p className="text-[11px] text-punk-yellow">
+              Relayed unshield needs a bundler key (NEXT_PUBLIC_PIMLICO_API_KEY).
+              Use a custom address, which links your public wallet, until it is
+              set.
+            </p>
+          ) : cleanAccounts.length === 0 ? (
+            <p className="text-[11px] text-muted">
+              No clean accounts yet. Create one, funds arrive with no link to
+              your public wallet and no gas needed.
+            </p>
+          ) : (
+            <select
+              value={cleanDest?.address ?? ""}
+              onChange={(e) =>
+                setCleanDest(
+                  cleanAccounts.find((w) => w.address === e.target.value) ?? null
+                )
+              }
+              className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
+            >
+              {cleanAccounts.map((w) => (
+                <option key={w.address} value={w.address}>
+                  {w.username} ({formatAddress(w.address)})
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={onCreateClean}
+            disabled={busy}
+            className="w-full py-2 rounded-sm border border-punk-purple/40 text-punk-purple text-xs font-medium hover:bg-punk-purple/10 disabled:opacity-50"
+          >
+            + Create new clean account
+          </button>
+          <p className="text-[11px] text-muted">
+            Gas is paid from your shielded balance via Railgun&apos;s privacy
+            paymaster, so the destination needs no ETH, and the transaction is
+            not linked to your public address.
+          </p>
+        </div>
+      ) : (
+        <>
+          <input
+            type="text"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder={`Destination (default: your wallet ${formatAddress(ownAddress)})`}
+            className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
+          />
+          <p className="text-[11px] text-punk-yellow">
+            You submit this transaction yourself, so it links your public
+            address to the withdrawal on-chain. Use a clean account for
+            unlinkable withdrawals.
+          </p>
+        </>
+      )}
+
       <button
         onClick={onSubmit}
         disabled={busy || !amount}

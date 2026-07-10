@@ -35,6 +35,7 @@ export interface PasskeyCredential {
   createdAt: number;
   username?: string;
   isImported?: boolean; // true if wallet was imported via private key
+  index?: number; // active HD account index (0 = primary; absent means 0)
 }
 
 // How a wallet's key comes into existence. Recorded so a build/config change
@@ -53,6 +54,8 @@ export interface StoredWallet {
   address: string;
   createdAt: number;
   isImported?: boolean; // true if wallet was imported via private key
+  index?: number; // HD account index (0 = primary; absent means 0). Multiple
+  // entries can share a credentialId, differing only by index+address.
   meta?: WalletDerivationMeta; // absent on entries created before mid-2026, backfilled on unlock
 }
 
@@ -66,6 +69,7 @@ export interface PublicWalletInfo {
   username?: string;
   createdAt: number;
   isImported: boolean;
+  index?: number; // HD account index (0 = primary)
 }
 
 // Storage keys
@@ -211,8 +215,20 @@ export class UserCancelledError extends Error {
 
 // Derive the EOA private key from the PRF secret via HKDF-SHA256.
 // The PRF secret is Input Keying Material, not used directly as the key.
-function derivePrivateKeyFromPrf(prfSecret: Uint8Array): `0x${string}` {
-  const key = hkdf(sha256, prfSecret, undefined, EOA_HKDF_INFO, 32);
+//
+// `index` selects an HD-style account. Index 0 uses the original info string,
+// so the primary address is byte-identical to before this change and never
+// moves. Indices > 0 are additional clean accounts (e.g. private-unshield
+// destinations), domain-separated by an indexed info label.
+function derivePrivateKeyFromPrf(
+  prfSecret: Uint8Array,
+  index = 0
+): `0x${string}` {
+  const info =
+    index === 0
+      ? EOA_HKDF_INFO
+      : new TextEncoder().encode(`PunkWallet-EOA-v2:acct:${index}`);
+  const key = hkdf(sha256, prfSecret, undefined, info, 32);
   return bytesToHex(key);
 }
 
@@ -328,12 +344,13 @@ function backfillDerivationMeta(credentialId: string, imported: boolean): void {
   localStorage.setItem(WALLETS_LIST_KEY, JSON.stringify(wallets));
 }
 
-// Save wallet to the list
+// Save wallet to the list. Identity is (credentialId, index): one credential
+// can hold several HD accounts, so a second index must not overwrite index 0.
 export function saveWalletToList(wallet: StoredWallet): void {
   const wallets = getStoredWallets();
-  // Check if already exists
+  const walletIndex = wallet.index ?? 0;
   const existingIndex = wallets.findIndex(
-    (w) => w.credentialId === wallet.credentialId
+    (w) => w.credentialId === wallet.credentialId && (w.index ?? 0) === walletIndex
   );
   if (existingIndex >= 0) {
     wallets[existingIndex] = wallet;
@@ -479,6 +496,11 @@ async function withKeyForCredential<T>(
     credentialId: string;
     isImportedHint?: boolean;
     expectedAddress?: string;
+    // HD account index. 0 (default) is the primary account. The Kohaku
+    // privacy root is always derived from the credential's index-0 identity,
+    // so a derived account is a clean public destination, not its own 0zk
+    // account.
+    index?: number;
   },
   fn: (key: {
     privateKey: `0x${string}`;
@@ -501,7 +523,8 @@ async function withKeyForCredential<T>(
       opts.credentialId,
       prfSecret,
       imported,
-      opts.expectedAddress
+      opts.expectedAddress,
+      opts.index ?? 0
     );
     const deriveKohakuRoot = (): Uint8Array => {
       if (!boundaryOpen) {
@@ -537,6 +560,7 @@ export async function unsafeWithSessionKey<T>(
     credentialId: string;
     isImported?: boolean;
     address?: `0x${string}`;
+    index?: number;
   },
   fn: (privateKey: `0x${string}`, address: `0x${string}`) => Promise<T>
 ): Promise<T> {
@@ -545,6 +569,7 @@ export async function unsafeWithSessionKey<T>(
       credentialId: target.credentialId,
       isImportedHint: target.isImported,
       expectedAddress: target.address,
+      index: target.index,
     },
     ({ privateKey, address }) => fn(privateKey, address)
   );
@@ -562,6 +587,7 @@ export async function unsafeWithSessionSecrets<T>(
     credentialId: string;
     isImported?: boolean;
     address?: `0x${string}`;
+    index?: number;
   },
   fn: (key: {
     privateKey: `0x${string}`;
@@ -574,6 +600,7 @@ export async function unsafeWithSessionSecrets<T>(
       credentialId: target.credentialId,
       isImportedHint: target.isImported,
       expectedAddress: target.address,
+      index: target.index,
     },
     fn
   );
@@ -681,8 +708,10 @@ export async function unlockCurrentWallet(options?: {
   }
 
   const credential: PasskeyCredential = JSON.parse(stored);
+  const activeIndex = credential.index ?? 0;
   const storedWallet = getStoredWallets().find(
-    (w) => w.credentialId === credential.credentialId
+    (w) =>
+      w.credentialId === credential.credentialId && (w.index ?? 0) === activeIndex
   );
   const imported = await isImportedCredential(
     credential.credentialId,
@@ -696,6 +725,7 @@ export async function unlockCurrentWallet(options?: {
         credentialId: credential.credentialId,
         isImportedHint: imported,
         expectedAddress: storedWallet?.address,
+        index: activeIndex,
       },
       async (key) => {
         options?.onKohakuRoot?.(key.deriveKohakuRoot());
@@ -725,6 +755,7 @@ export async function unlockCurrentWallet(options?: {
     username: credential.username,
     createdAt: credential.createdAt,
     isImported: imported,
+    index: activeIndex,
   };
 }
 
@@ -905,6 +936,7 @@ export async function unlockWallet(
     storedWallet.isImported
   );
 
+  const accountIndex = storedWallet.index ?? 0;
   let address: `0x${string}`;
   try {
     address = await withKeyForCredential(
@@ -912,6 +944,7 @@ export async function unlockWallet(
         credentialId: storedWallet.credentialId,
         isImportedHint: imported,
         expectedAddress: storedWallet.address,
+        index: accountIndex,
       },
       async (key) => {
         options?.onKohakuRoot?.(key.deriveKohakuRoot());
@@ -923,7 +956,7 @@ export async function unlockWallet(
     throw error;
   }
 
-  // Save as current credential
+  // Save as current credential, remembering which HD account is active
   const credential: PasskeyCredential = {
     credentialId: storedWallet.credentialId,
     credentialIdHex: storedWallet.credentialIdHex,
@@ -931,6 +964,7 @@ export async function unlockWallet(
     createdAt: storedWallet.createdAt,
     username: storedWallet.username,
     isImported: imported,
+    index: accountIndex,
   };
   localStorage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(credential));
   backfillDerivationMeta(storedWallet.credentialId, imported);
@@ -942,6 +976,63 @@ export async function unlockWallet(
     username: storedWallet.username,
     createdAt: storedWallet.createdAt,
     isImported: imported,
+    index: accountIndex,
+  };
+}
+
+// Create a new HD-derived account under the current passkey credential. One
+// ceremony derives the next free index's address (no key retained), then a
+// StoredWallet entry is saved. Used for clean private-unshield destinations.
+// Only prf-derived credentials support this (imported wallets hold a single
+// stored key with no HD indices).
+export async function createDerivedAccount(
+  credentialId: string,
+  username?: string
+): Promise<PublicWalletInfo | null> {
+  if (await isImportedCredential(credentialId)) {
+    throw new Error(
+      "Imported wallets cannot derive additional accounts (they have a single stored key)."
+    );
+  }
+  const wallets = getStoredWallets();
+  const forCredential = wallets.filter((w) => w.credentialId === credentialId);
+  if (forCredential.length === 0) {
+    throw new Error("No account found for this passkey.");
+  }
+  const primary = forCredential.find((w) => (w.index ?? 0) === 0) ?? forCredential[0];
+  const nextIndex =
+    Math.max(...forCredential.map((w) => w.index ?? 0)) + 1;
+
+  let address: `0x${string}`;
+  try {
+    address = await withKeyForCredential(
+      { credentialId, isImportedHint: false, index: nextIndex },
+      async (key) => key.address
+    );
+  } catch (error) {
+    if (error instanceof UserCancelledError) return null;
+    throw error;
+  }
+
+  const name = username || `${primary.username || "Account"} ${nextIndex + 1}`;
+  saveWalletToList({
+    credentialId,
+    credentialIdHex: primary.credentialIdHex,
+    username: name,
+    address,
+    createdAt: Date.now(),
+    index: nextIndex,
+    meta: buildDerivationMeta(false),
+  });
+
+  return {
+    credentialId,
+    credentialIdHex: primary.credentialIdHex,
+    address,
+    username: name,
+    createdAt: Date.now(),
+    isImported: false,
+    index: nextIndex,
   };
 }
 
@@ -1151,11 +1242,14 @@ async function resolveKeyForCredential(
   credentialId: string,
   prfSecret: Uint8Array,
   isImported: boolean,
-  expectedAddress?: string
+  expectedAddress?: string,
+  index = 0
 ): Promise<{ privateKey: `0x${string}`; address: `0x${string}` }> {
+  // Imported wallets have a single stored key and no HD indices; only the
+  // prf-derived path supports index > 0.
   const privateKey = isImported
     ? await decryptImportedPrivateKey(credentialId, prfSecret)
-    : derivePrivateKeyFromPrf(prfSecret);
+    : derivePrivateKeyFromPrf(prfSecret, index);
 
   const { privateKeyToAccount } = await import("viem/accounts");
   const account = privateKeyToAccount(privateKey);
