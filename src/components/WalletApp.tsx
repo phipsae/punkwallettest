@@ -2305,6 +2305,7 @@ export default function WalletApp() {
               <PrivacyPanel
                 wallet={wallet}
                 network={network}
+                publicBalance={balance}
                 onError={(m) => setError(m)}
                 onSuccess={(m) => {
                   setSuccess(m);

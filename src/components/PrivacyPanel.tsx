@@ -72,11 +72,14 @@ const PROTOCOL_BLURBS: Record<ProtocolId, string> = {
 export default function PrivacyPanel({
   wallet,
   network,
+  publicBalance,
   onError,
   onSuccess,
 }: {
   wallet: PublicWalletInfo;
   network: string;
+  // Formatted native balance of the public wallet (what can be shielded)
+  publicBalance?: string;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
 }) {
@@ -560,6 +563,7 @@ export default function PrivacyPanel({
         protocol={shieldProtocol}
         setProtocol={setShieldProtocol}
         tokenRow={activeRow}
+        publicBalance={publicBalance}
         amount={shieldAmount}
         setAmount={setShieldAmount}
         busy={busy}
@@ -942,6 +946,7 @@ function ShieldForm({
   protocol,
   setProtocol,
   tokenRow,
+  publicBalance,
   amount,
   setAmount,
   busy,
@@ -951,6 +956,7 @@ function ShieldForm({
   protocol: ProtocolId;
   setProtocol: (p: ProtocolId) => void;
   tokenRow: PrivateBalanceRow | null;
+  publicBalance?: string;
   amount: string;
   setAmount: (v: string) => void;
   busy: boolean;
@@ -960,6 +966,11 @@ function ShieldForm({
   const available = getAvailableProtocols();
   const asset =
     protocol === "railgun" && tokenRow?.contract ? tokenRow.symbol : "ETH";
+  // The shield tx is paid from the public balance, so Max keeps gas headroom
+  const maxShieldable =
+    publicBalance != null
+      ? Math.max(0, parseFloat(publicBalance) - 0.001)
+      : null;
   return (
     <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -987,6 +998,22 @@ function ShieldForm({
         ))}
       </div>
 
+      {asset === "ETH" && maxShieldable !== null && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted">
+            Public balance{" "}
+            <span className="font-mono text-foreground">
+              {parseFloat(publicBalance!).toFixed(5)} ETH
+            </span>
+          </span>
+          <button
+            onClick={() => setAmount(maxShieldable.toString())}
+            className="font-mono text-accent hover:text-accent-light"
+          >
+            Max
+          </button>
+        </div>
+      )}
       <input
         type="text"
         inputMode="decimal"
