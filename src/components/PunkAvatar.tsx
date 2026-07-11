@@ -179,7 +179,7 @@ function seededRandom(hash: number[], index: number): number {
 // Hair style generators
 const HAIR_STYLES = [
   // Mohawk
-  (hash: number[]) => {
+  () => {
     const pixels: Pixel[] = [];
     for (let y = 3; y < 8; y++) {
       pixels.push({ x: 11, y });
@@ -211,7 +211,7 @@ const HAIR_STYLES = [
   // Bald
   () => [],
   // Top spiky
-  (hash: number[]) => {
+  () => {
     const pixels: Pixel[] = [];
     for (let x = 8; x < 16; x++) {
       const spike = x % 2 === 0;
@@ -240,7 +240,7 @@ const HAIR_STYLES = [
     return pixels;
   },
   // Cap/beanie
-  (hash: number[]) => {
+  () => {
     const pixels: Pixel[] = [];
     for (let x = 7; x < 17; x++) {
       for (let y = 6; y < 10; y++) {
@@ -254,7 +254,7 @@ const HAIR_STYLES = [
     return pixels;
   },
   // Pigtails
-  (hash: number[]) => {
+  () => {
     const pixels: Pixel[] = [];
     // Top
     for (let x = 8; x < 16; x++) {
@@ -275,7 +275,7 @@ const HAIR_STYLES = [
     return pixels;
   },
   // Hoodie
-  (hash: number[]) => {
+  () => {
     const pixels: Pixel[] = [];
     // Top of hood
     for (let x = 6; x < 18; x++) {

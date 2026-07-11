@@ -16,6 +16,7 @@ import {
   unsafeWithSessionSecrets,
   unlockCurrentWallet,
   unlockWallet,
+  getStoredCredential,
   createDerivedAccount as createDerivedAccountImpl,
   type PublicWalletInfo,
   type StoredWallet,
@@ -43,10 +44,7 @@ export type SignerTarget = Pick<
 // derives the privacy root and installs it into the session module, so
 // enabled users pay zero extra biometric prompts.
 export async function unlockIdentity(): Promise<PublicWalletInfo | null> {
-  const stored = localStorage.getItem("punk_wallet_credential");
-  const credentialId = stored
-    ? (JSON.parse(stored) as { credentialId?: string }).credentialId
-    : undefined;
+  const credentialId = getStoredCredential()?.credentialId;
   const wantsPrivacy = credentialId ? isPrivacyEnabled(credentialId) : false;
   return unlockCurrentWallet(
     wantsPrivacy && credentialId
@@ -172,6 +170,8 @@ export async function signAndSendBatch(args: {
       waitForReceipt: true,
     });
     if (!result.success) {
+      // A mined-but-reverted tx still has a real hash worth surfacing
+      if (result.hash !== "0x0") hashes.push(result.hash);
       return { hashes, success: false, error: result.error };
     }
     hashes.push(result.hash);

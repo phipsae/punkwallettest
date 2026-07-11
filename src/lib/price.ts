@@ -15,7 +15,6 @@ const POL_POOL_ADDRESS = "0x290A6a7460B308ee3F19023D2D00dE604bcf5B42" as const;
 
 // Token addresses
 const USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".toLowerCase();
-const WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".toLowerCase();
 const POL_ADDRESS = "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0".toLowerCase();
 
 // Alchemy API Key
@@ -26,9 +25,7 @@ const RPC_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
 const priceCache: Record<string, { price: number; timestamp: number }> = {};
 const CACHE_DURATION = 30000; // 30 seconds
 
-// Networks that use ETH as native currency
-const ETH_NETWORKS = ["mainnet", "arbitrum", "base", "optimism", "linea", "zksync"];
-// Networks that use POL as native currency
+// Networks that use POL as native currency (everything else uses ETH)
 const POL_NETWORKS = ["polygon"];
 
 /**

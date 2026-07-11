@@ -1,9 +1,9 @@
 import { Core } from "@walletconnect/core";
 import { WalletKit, WalletKitTypes } from "@reown/walletkit";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
-import { formatEther, type Hex, type Chain } from "viem";
+import { formatEther, hexToString, type Hex, type Chain } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
-import { getAllNetworks, getAllNetworkIds, getCustomNetworks } from "./wallet";
+import { getAllNetworks } from "./wallet";
 
 // WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
 const PROJECT_ID =
@@ -14,7 +14,7 @@ function getSupportedChains(): Record<string, Chain> {
   const networks = getAllNetworks();
   const supportedChains: Record<string, Chain> = {};
 
-  for (const [networkId, chain] of Object.entries(networks)) {
+  for (const chain of Object.values(networks)) {
     supportedChains[`eip155:${chain.id}`] = chain;
   }
 
@@ -579,11 +579,10 @@ export function formatRequestDisplay(request: SessionRequest): RequestDisplay {
       const message = params[0] as string;
       let decodedMessage = message;
       try {
-        // Try to decode hex message
+        // Try to decode hex message (no Buffer: it isn't polyfilled in the
+        // static browser build)
         if (message.startsWith("0x")) {
-          decodedMessage = Buffer.from(message.slice(2), "hex").toString(
-            "utf8"
-          );
+          decodedMessage = hexToString(message as Hex);
         }
       } catch {
         // Keep original if decoding fails

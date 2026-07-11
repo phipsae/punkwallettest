@@ -1053,7 +1053,11 @@ export function getStoredCredential(): PasskeyCredential | null {
   if (typeof window === "undefined") return null;
   const stored = localStorage.getItem(CREDENTIAL_STORAGE_KEY);
   if (!stored) return null;
-  return JSON.parse(stored);
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return null;
+  }
 }
 
 // Remove a wallet from the stored wallets list
@@ -1148,14 +1152,19 @@ async function deriveEncryptionKey(prfSecret: Uint8Array): Promise<CryptoKey> {
   const keyBytes = hkdf(sha256, prfSecret, undefined, ENC_HKDF_INFO, 32);
   // Copy into a standalone ArrayBuffer for crypto.subtle
   const keyBuffer = keyBytes.slice().buffer;
+  keyBytes.fill(0);
 
-  return await crypto.subtle.importKey(
-    "raw",
-    keyBuffer,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
+  try {
+    return await crypto.subtle.importKey(
+      "raw",
+      keyBuffer,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  } finally {
+    new Uint8Array(keyBuffer).fill(0);
+  }
 }
 
 // Encrypt private key using AES-GCM
