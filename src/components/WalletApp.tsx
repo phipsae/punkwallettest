@@ -2086,7 +2086,14 @@ export default function WalletApp() {
           {wallet ? (
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setShowAccountSwitcher(true)}
+                onClick={() => {
+                  // Pick up accounts created since mount (e.g. clean
+                  // unshield destinations from the privacy panel)
+                  const wallets = getStoredWallets();
+                  setStoredWallets(wallets);
+                  fetchWalletBalances(wallets);
+                  setShowAccountSwitcher(true);
+                }}
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
                 {useEnsAvatar && ensAvatarUrl ? (
