@@ -8,8 +8,18 @@ const nextConfig: NextConfig = {
   // Hide the Next.js dev indicator in bottom-left corner
   devIndicators: false,
 
-  // Empty turbopack config to satisfy Next.js 16 requirement
-  turbopack: {},
+  // `next dev --turbopack` ignores the webpack() block below, so the virtual
+  // wasm specifier has to be aliased here too or dev-mode privacy features
+  // fail with "Can't resolve '@kohaku-railgun-wasm'".
+  turbopack: {
+    // Pin the workspace root; Turbopack otherwise sometimes misinfers it as
+    // src/app and fails to resolve the next package.
+    root: process.cwd(),
+    resolveAlias: {
+      "@kohaku-railgun-wasm":
+        "./node_modules/@kohaku-eth/railgun/dist/pkg/index_bg.wasm",
+    },
+  },
 
   webpack: (config, { webpack }) => {
     // Fix for WalletConnect dependencies that use Node.js modules

@@ -141,9 +141,40 @@ export class PrivacyInitError extends Error {
 // ---------------------------------------------------------------------------
 // Wasm + module init
 
+// The Railgun prover downloads its SNARK artifacts at proof time from a host
+// baked into the wasm: `github.com/<owner>/<repo>/raw/<ref>/<path>`. That URL
+// 302-redirects to raw.githubusercontent.com, but the redirect response
+// carries no valid `access-control-allow-origin`, so a cross-origin browser
+// fetch is blocked on the redirect hop and reqwest reports it as the opaque
+// "Artifact loader error: HTTP error: error sending request". Rewriting to the
+// redirect target up front skips the bad hop; raw.githubusercontent.com serves
+// the files directly with `access-control-allow-origin: *`.
+const GH_RAW_RE = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/raw\/(.+)$/;
+function rewriteGithubRaw(url: string): string {
+  const m = GH_RAW_RE.exec(url);
+  return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}` : url;
+}
+let fetchShimInstalled = false;
+function installGithubRawFetchShim(): void {
+  if (fetchShimInstalled || typeof globalThis.fetch !== "function") return;
+  fetchShimInstalled = true;
+  const original = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input === "string" || input instanceof URL) {
+      const rewritten = rewriteGithubRaw(input.toString());
+      return original(rewritten, init);
+    }
+    const rewritten = rewriteGithubRaw(input.url);
+    return rewritten === input.url
+      ? original(input, init)
+      : original(new Request(rewritten, input), init);
+  }) as typeof globalThis.fetch;
+}
+
 async function ensureRailgunWasm(logLevel?: string): Promise<
   typeof import("@kohaku-eth/railgun")
 > {
+  installGithubRawFetchShim();
   const railgun = await import("@kohaku-eth/railgun");
   // CRITICAL: initialize with an explicit wasm source. The SDK's own
   // ensureInitialized(undefined) takes a Node fs branch in the browser
@@ -182,6 +213,9 @@ const PRIVACY_POOLS_RELAYER_URL =
 
 let state: RegistryState | null = null;
 let initPromise: Promise<RegistryState> | null = null;
+// Bumped by resetPrivacy so an in-flight init can't assign `state` after a
+// lock/wallet-switch invalidated it
+let initGeneration = 0;
 let idbAvailable: boolean | null = null;
 let lastInitError: string | null = null;
 
@@ -204,7 +238,12 @@ function withPluginLock<T>(fn: () => Promise<T>): Promise<T> {
 export function resetPrivacy(): void {
   state = null;
   initPromise = null;
+  initGeneration++;
   lastInitError = null;
+  // Drop any proved-but-unbroadcast ops so they can't be broadcast by a
+  // different wallet after a lock/switch.
+  pendingTransferOp = null;
+  pendingUnshieldOp = null;
 }
 
 export function getPrivacyInitError(): string | null {
@@ -217,6 +256,24 @@ export function isPrivacyReady(credentialId: string, networkId: string): boolean
     state.credentialId === credentialId &&
     state.networkId === networkId
   );
+}
+
+// Largest amount that can be unshielded in one go. A Railgun unshield also
+// costs the protocol fee (feeBps, added on top of the withdrawn amount), and
+// the relayed/clean path additionally repays the paymaster's gas out of the
+// shielded balance. So unshielding the full spendable always fails. No exact
+// gas quote is exposed by the SDK, so the relayed cushion is a heuristic.
+export function maxUnshieldAmount(
+  row: PrivateBalanceRow,
+  relayed: boolean
+): bigint {
+  const feeBps = BigInt(state?.railgunUnshieldFeeBps ?? 25);
+  // Reserve the protocol fee: max V with V + V*feeBps/10000 <= spendable.
+  const afterFee = (row.spendable * BigInt(10000)) / (BigInt(10000) + feeBps);
+  if (!relayed) return afterFee;
+  // Extra 0.5% cushion for the paymaster's gas reimbursement.
+  const withCushion = (afterFee * BigInt(9950)) / BigInt(10000);
+  return withCushion > BigInt(0) ? withCushion : BigInt(0);
 }
 
 function buildHost(
@@ -276,6 +333,7 @@ export async function initPrivacy(
   }
 
   if (!initPromise) {
+    const generation = ++initGeneration;
     initPromise = (async () => {
       const enabled = getEnabledProtocols(credentialId);
       const chainId = getChainIdForNetwork(networkId)!;
@@ -358,6 +416,13 @@ export async function initPrivacy(
         }
       }
 
+      if (generation !== initGeneration) {
+        // resetPrivacy ran mid-init (lock/wallet switch); don't resurrect
+        throw new PrivacyInitError(
+          "Privacy initialization was superseded.",
+          "init-failed"
+        );
+      }
       state = next;
       // Only a total wipe-out is a hard error; partial failures are logged
       // and surfaced softly, other protocols still work.
@@ -367,10 +432,14 @@ export async function initPrivacy(
           : null;
       return next;
     })().catch((error) => {
-      initPromise = null;
-      lastInitError =
+      const message =
         error instanceof Error ? error.message : "Privacy initialization failed";
-      throw new PrivacyInitError(lastInitError, "init-failed");
+      // A superseded init must not clobber the promise/error of a newer one
+      if (generation === initGeneration) {
+        initPromise = null;
+        lastInitError = message;
+      }
+      throw new PrivacyInitError(message, "init-failed");
     });
   }
   await initPromise;
@@ -738,7 +807,6 @@ class Eip1193Adapter {
       call(args: { to: string; input: string }): Promise<string | undefined>;
       estimateGas(args: { to: string; from?: string; input: string }): Promise<bigint>;
       getGasPrice(): Promise<bigint>;
-      getTransactionCount(address: string, block?: number): Promise<number | bigint>;
     }
   ) {}
   getChainId() {
@@ -781,7 +849,14 @@ class Eip1193Adapter {
     return this.provider.getGasPrice();
   }
   async getTransactionCount(address: `0x${string}`, block: number | undefined) {
-    return BigInt(await this.provider.getTransactionCount(address, block));
+    // The viem provider adapter exposes no getTransactionCount, so go through
+    // the raw JSON-RPC method instead.
+    const blockTag = block === undefined ? "latest" : `0x${block.toString(16)}`;
+    const hex = (await this.provider.request({
+      method: "eth_getTransactionCount",
+      params: [address, blockTag],
+    })) as string;
+    return BigInt(hex);
   }
 }
 
@@ -867,9 +942,11 @@ async function broadcastPendingOp(
     plugin.setSmartAccount(smartAccount, signer);
     await plugin.broadcast(op);
   } finally {
-    // Detach and free the key-bearing signer immediately
-    (signer as unknown as { free?: () => void }).free?.();
+    // Detach first so the plugin never retains a reference to the freed
+    // wasm signer, then free the key-bearing signer immediately
+    plugin.setSmartAccount(undefined, undefined);
     plugin.setBundler(undefined);
+    (signer as unknown as { free?: () => void }).free?.();
   }
 }
 

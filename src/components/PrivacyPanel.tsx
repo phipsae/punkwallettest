@@ -5,7 +5,7 @@
 // state; never touches key material (signing goes through signer.ts) and
 // never holds SDK plugin objects (those live in kohaku.ts).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { QRCodeSVG } from "qrcode.react";
 import type { PublicWalletInfo, StoredWallet } from "@/lib/passkey";
@@ -30,6 +30,7 @@ import {
   isPrivacyReady,
   getPrivacyInitError,
   getAvailableProtocols,
+  maxUnshieldAmount,
   type ProtocolId,
   type PrivateBalanceRow,
 } from "@/lib/kohaku";
@@ -123,12 +124,16 @@ export default function PrivacyPanel({
 
   useEffect(() => onVerifiedStatus(setVerifiedStatusState), []);
 
+  // Epoch guard: a slow sync for the previous wallet/network must not
+  // overwrite the rows fetched after a switch
+  const balancesEpoch = useRef(0);
   const refreshBalances = useCallback(async () => {
     if (!isPrivacyReady(wallet.credentialId, network)) return;
+    const epoch = ++balancesEpoch.current;
     setLoadingBalances(true);
     try {
       const rows = await getPrivateBalances();
-      setBalances(rows);
+      if (epoch === balancesEpoch.current) setBalances(rows);
     } catch (err) {
       console.error("Failed to load private balances", err);
     } finally {
@@ -1031,6 +1036,33 @@ function UnshieldForm({
             </option>
           ))}
         </select>
+      )}
+      {activeRow && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted">
+            Shielded balance{" "}
+            <span className="font-mono text-foreground">
+              {formatUnits(activeRow.spendable, activeRow.decimals)}{" "}
+              {activeRow.symbol}
+            </span>
+          </span>
+          <button
+            onClick={() =>
+              setAmount(
+                formatUnits(
+                  maxUnshieldAmount(
+                    activeRow,
+                    isRailgun && mode === "clean" && relayedAvailable
+                  ),
+                  activeRow.decimals
+                )
+              )
+            }
+            className="font-mono text-accent hover:text-accent-light"
+          >
+            Max
+          </button>
+        </div>
       )}
       <input
         type="text"
