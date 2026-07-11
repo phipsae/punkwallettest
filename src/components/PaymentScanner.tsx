@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Capacitor } from "@capacitor/core";
+import WebQrScanner from "./WebQrScanner";
 
 interface PaymentScannerProps {
   onScan: (address: string, amount?: string, tokenAddress?: string) => void;
@@ -102,8 +103,9 @@ export default function PaymentScanner({
 }: PaymentScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const isNative = Capacitor.isNativePlatform();
 
-  // Start the scanner
+  // Start the native scanner (web renders WebQrScanner inline instead)
   const startScanner = useCallback(async () => {
     setScanning(true);
     setError(null);
@@ -147,8 +149,8 @@ export default function PaymentScanner({
 
   // Start scanning on mount
   useEffect(() => {
-    startScanner();
-  }, [startScanner]);
+    if (isNative) startScanner();
+  }, [isNative, startScanner]);
 
   const handleClose = () => {
     onClose();
@@ -156,7 +158,16 @@ export default function PaymentScanner({
 
   const handleRetry = () => {
     setError(null);
-    startScanner();
+    if (isNative) startScanner();
+  };
+
+  const handleWebResult = (text: string) => {
+    const parsed = parsePaymentUri(text);
+    if (parsed) {
+      onScan(parsed.address, parsed.amount, parsed.tokenAddress);
+    } else {
+      setError("Invalid payment QR code. Expected an Ethereum address.");
+    }
   };
 
   return (
@@ -218,6 +229,13 @@ export default function PaymentScanner({
                 Try Again
               </button>
             </div>
+          </div>
+        ) : !isNative ? (
+          <div className="w-full flex flex-col items-center space-y-4">
+            <WebQrScanner onResult={handleWebResult} onError={setError} />
+            <p className="text-xs text-muted">
+              Point your camera at a payment QR code
+            </p>
           </div>
         ) : scanning ? (
           <div className="text-center space-y-4">
