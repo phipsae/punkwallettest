@@ -44,7 +44,7 @@ export const DEFAULT_TOKENS: Record<string, Token[]> = {
       logoURI: "https://assets.coingecko.com/coins/images/6319/small/usdc.png",
     },
     {
-      address: "0x6B175474E89094C44Da98b954EecdecCB5BE1b6B",
+      address: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
       symbol: "DAI",
       name: "Dai Stablecoin",
       decimals: 18,
@@ -260,7 +260,8 @@ export async function getTokenBalance(
       balanceRaw: balance,
     };
   } catch (error) {
-    console.error(`Failed to get balance for ${token.symbol}:`, error);
+    // Handled: a token that can't be read just shows a zero balance
+    console.warn(`Failed to get balance for ${token.symbol}:`, error);
     return {
       token,
       balance: "0",
@@ -280,7 +281,6 @@ export async function getAllTokenBalances(
     tokens.map((token) => getTokenBalance(address, token, networkId))
   );
 
-  // Filter out zero balances for cleaner display, but keep all tokens available
   return balances;
 }
 
