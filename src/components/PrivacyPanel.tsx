@@ -31,6 +31,8 @@ import {
   getPrivacyInitError,
   getAvailableProtocols,
   maxUnshieldAmount,
+  estimateRelayedGasRepayment,
+  unshieldCost,
   type ProtocolId,
   type PrivateBalanceRow,
 } from "@/lib/kohaku";
@@ -102,6 +104,19 @@ export default function PrivacyPanel({
   const [sendAmount, setSendAmount] = useState("");
   const [sendTo0zk, setSendTo0zk] = useState("");
   const [activeRow, setActiveRow] = useState<PrivateBalanceRow | null>(null);
+  // What the relayed path will deduct from the shielded balance to repay the
+  // paymaster's gas, quoted when the unshield form opens. Null = no quote.
+  const [relayGasReserve, setRelayGasReserve] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (panelView !== "unshield" || !isRelayedUnshieldAvailable()) return;
+    let cancelled = false;
+    estimateRelayedGasRepayment().then((v) => {
+      if (!cancelled) setRelayGasReserve(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [panelView]);
   const [verifiedStatus, setVerifiedStatusState] = useState<VerifiedStatus>(
     getVerifiedStatus()
   );
@@ -300,6 +315,35 @@ export default function PrivacyPanel({
         onError("Create or pick a clean account first.");
         return;
       }
+      // Fail before the minute-long proof: the paymaster repays its gas from
+      // the shielded ETH balance, so amount + protocol fee + gas must fit.
+      const gasReserve = await estimateRelayedGasRepayment();
+      if (gasReserve !== null) {
+        const ethRow =
+          row.contract === null
+            ? row
+            : balances.find(
+                (r) => r.protocol === "railgun" && r.contract === null
+              );
+        const ethNeeded =
+          (row.contract === null ? unshieldCost(amount) : BigInt(0)) +
+          gasReserve;
+        if (!ethRow || ethNeeded > ethRow.spendable) {
+          onError(
+            `Not enough shielded ETH for the relayed unshield: it needs about ${formatUnits(
+              ethNeeded,
+              18
+            )} ETH (incl. ~${formatUnits(
+              gasReserve,
+              18
+            )} gas the paymaster repays itself from your shielded balance), but ${formatUnits(
+              ethRow?.spendable ?? BigInt(0),
+              18
+            )} is spendable. Shield more ETH first, or unshield less.`
+          );
+          return;
+        }
+      }
       setBusy(true);
       setProving(true);
       try {
@@ -381,7 +425,7 @@ export default function PrivacyPanel({
       setBusy(false);
       setProving(false);
     }
-  }, [activeRow, unshieldAmount, unshieldTo, unshieldMode, cleanDest, wallet, network, onError, onSuccess, refreshBalances]);
+  }, [activeRow, balances, unshieldAmount, unshieldTo, unshieldMode, cleanDest, wallet, network, onError, onSuccess, refreshBalances]);
 
   const handlePrivateSend = useCallback(async () => {
     const row = activeRow;
@@ -539,6 +583,7 @@ export default function PrivacyPanel({
         mode={unshieldMode}
         setMode={setUnshieldMode}
         relayedAvailable={isRelayedUnshieldAvailable()}
+        relayGasReserve={relayGasReserve}
         cleanAccounts={cleanAccounts}
         cleanDest={cleanDest}
         setCleanDest={setCleanDest}
@@ -979,6 +1024,7 @@ function UnshieldForm({
   mode,
   setMode,
   relayedAvailable,
+  relayGasReserve,
   cleanAccounts,
   cleanDest,
   setCleanDest,
@@ -998,6 +1044,7 @@ function UnshieldForm({
   mode: "clean" | "custom";
   setMode: (m: "clean" | "custom") => void;
   relayedAvailable: boolean;
+  relayGasReserve: bigint | null;
   cleanAccounts: StoredWallet[];
   cleanDest: StoredWallet | null;
   setCleanDest: (w: StoredWallet | null) => void;
@@ -1007,6 +1054,11 @@ function UnshieldForm({
   onBack: () => void;
 }) {
   const isRailgun = activeRow?.protocol === "railgun";
+  // Gas repayment comes out of the shielded ETH balance, so it only caps Max
+  // on the native row of a relayed (clean) unshield
+  const relayed = isRailgun && mode === "clean" && relayedAvailable;
+  const maxReserve =
+    relayed && activeRow?.contract === null ? relayGasReserve : null;
   return (
     <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -1050,10 +1102,7 @@ function UnshieldForm({
             onClick={() =>
               setAmount(
                 formatUnits(
-                  maxUnshieldAmount(
-                    activeRow,
-                    isRailgun && mode === "clean" && relayedAvailable
-                  ),
+                  maxUnshieldAmount(activeRow, maxReserve),
                   activeRow.decimals
                 )
               )
@@ -1136,6 +1185,16 @@ function UnshieldForm({
             Gas is paid from your shielded balance via Railgun&apos;s privacy
             paymaster, so the destination needs no ETH, and the transaction is
             not linked to your public address.
+            {relayGasReserve !== null && (
+              <>
+                {" "}
+                Currently ≈{" "}
+                <span className="font-mono">
+                  {Number(formatUnits(relayGasReserve, 18)).toFixed(5)} ETH
+                </span>{" "}
+                of shielded ETH is needed for that gas, on top of the amount.
+              </>
+            )}
           </p>
         </div>
       ) : (

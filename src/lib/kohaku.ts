@@ -258,22 +258,61 @@ export function isPrivacyReady(credentialId: string, networkId: string): boolean
   );
 }
 
+// Gas units a relayed Railgun unshield UserOp burns (Groth16 verification
+// dominates). Back-solved from an observed Sepolia repayment (~1.55M units);
+// only used for pre-flight UX math, the wasm computes the binding number at
+// broadcast.
+const RELAYED_UNSHIELD_GAS_UNITS = BigInt(1_600_000);
+
+// What the privacy paymaster will deduct from the shielded balance to repay
+// its gas, estimated from the bundler's current fast gas price plus a 25%
+// margin. Null when no bundler is configured or the quote fails.
+export async function estimateRelayedGasRepayment(): Promise<bigint | null> {
+  const s = state;
+  if (!s || !PIMLICO_API_KEY) return null;
+  try {
+    const res = await fetch(pimlicoUrl(s.chainId), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "pimlico_getUserOperationGasPrice",
+        params: [],
+      }),
+    });
+    const json = (await res.json()) as {
+      result?: { fast?: { maxFeePerGas?: string } };
+    };
+    const maxFee = BigInt(json?.result?.fast?.maxFeePerGas ?? 0);
+    if (maxFee <= BigInt(0)) return null;
+    return (maxFee * RELAYED_UNSHIELD_GAS_UNITS * BigInt(125)) / BigInt(100);
+  } catch {
+    return null;
+  }
+}
+
+// What actually leaves the shielded balance for an unshield of `amount`: the
+// protocol fee is added on top so the destination receives `amount` exactly.
+export function unshieldCost(amount: bigint): bigint {
+  const feeBps = BigInt(state?.railgunUnshieldFeeBps ?? 25);
+  return (amount * BigInt(10000)) / (BigInt(10000) - feeBps);
+}
+
 // Largest amount that can be unshielded in one go. A Railgun unshield also
 // costs the protocol fee (feeBps, added on top of the withdrawn amount), and
 // the relayed/clean path additionally repays the paymaster's gas out of the
-// shielded balance. So unshielding the full spendable always fails. No exact
-// gas quote is exposed by the SDK, so the relayed cushion is a heuristic.
+// shielded balance. So unshielding the full spendable always fails. Pass the
+// estimateRelayedGasRepayment() quote as `gasRepayment` for the relayed path.
 export function maxUnshieldAmount(
   row: PrivateBalanceRow,
-  relayed: boolean
+  gasRepayment: bigint | null = null
 ): bigint {
   const feeBps = BigInt(state?.railgunUnshieldFeeBps ?? 25);
-  // Reserve the protocol fee: max V with V + V*feeBps/10000 <= spendable.
-  const afterFee = (row.spendable * BigInt(10000)) / (BigInt(10000) + feeBps);
-  if (!relayed) return afterFee;
-  // Extra 0.5% cushion for the paymaster's gas reimbursement.
-  const withCushion = (afterFee * BigInt(9950)) / BigInt(10000);
-  return withCushion > BigInt(0) ? withCushion : BigInt(0);
+  const available = row.spendable - (gasRepayment ?? BigInt(0));
+  if (available <= BigInt(0)) return BigInt(0);
+  // Reserve the protocol fee: max V with V + V*feeBps/(10000-feeBps) <= available.
+  return (available * (BigInt(10000) - feeBps)) / BigInt(10000);
 }
 
 function buildHost(
@@ -941,6 +980,17 @@ async function broadcastPendingOp(
     plugin.setBundler(bundler);
     plugin.setSmartAccount(smartAccount, signer);
     await plugin.broadcast(op);
+  } catch (err) {
+    // The wasm reports amount + protocol fee + paymaster gas repayment
+    // overrunning the shielded balance as an opaque intent error
+    if (String(err).includes("Insufficient balance for intent")) {
+      throw new Error(
+        "Shielded balance can't cover this amount plus the relayer's gas " +
+          "repayment (the paymaster repays itself from your shielded funds). " +
+          "Shield more first, or unshield less."
+      );
+    }
+    throw err;
   } finally {
     // Detach first so the plugin never retains a reference to the freed
     // wasm signer, then free the key-bearing signer immediately
