@@ -18,6 +18,7 @@ import {
   createDerivedAccount,
 } from "@/lib/signer";
 import { isValidAddress, formatAddress } from "@/lib/wallet";
+import PunkAvatar from "./PunkAvatar";
 import {
   initPrivacy,
   getPrivateBalances,
@@ -432,8 +433,8 @@ export default function PrivacyPanel({
 
   const handlePrivateSend = useCallback(async () => {
     const row = activeRow;
-    if (!row || !row.contract) {
-      onError("Private send requires a shielded token balance.");
+    if (!row) {
+      onError("Private send requires a shielded balance.");
       return;
     }
     if (!sendTo0zk.startsWith("0zk")) {
@@ -601,7 +602,7 @@ export default function PrivacyPanel({
 
   if (panelView === "privateSend") {
     const tokenRows = balances.filter(
-      (r) => r.protocol === "railgun" && r.contract && r.spendable > BigInt(0)
+      (r) => r.protocol === "railgun" && r.spendable > BigInt(0)
     );
     return (
       <div className="rounded-sm border border-card-border bg-card-bg p-5 space-y-4">
@@ -616,8 +617,7 @@ export default function PrivacyPanel({
         </div>
         {tokenRows.length === 0 ? (
           <p className="text-sm text-muted">
-            You need a shielded ERC-20 token balance to send privately. Native
-            ETH private transfers are not supported in this version.
+            You need a shielded balance to send privately.
           </p>
         ) : (
           <>
@@ -760,10 +760,7 @@ export default function PrivacyPanel({
           onClick={() => {
             setActiveRow(
               balances.find(
-                (r) =>
-                  r.protocol === "railgun" &&
-                  r.contract &&
-                  r.spendable > BigInt(0)
+                (r) => r.protocol === "railgun" && r.spendable > BigInt(0)
               ) ?? null
             );
             setPanelView("privateSend");
@@ -1185,21 +1182,47 @@ function UnshieldForm({
               your public wallet and no gas needed.
             </p>
           ) : (
-            <select
-              value={cleanDest?.address ?? ""}
-              onChange={(e) =>
-                setCleanDest(
-                  cleanAccounts.find((w) => w.address === e.target.value) ?? null
-                )
-              }
-              className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
-            >
-              {cleanAccounts.map((w) => (
-                <option key={w.address} value={w.address}>
-                  {w.username} ({formatAddress(w.address)})
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {cleanAccounts.map((w) => {
+                const selected = cleanDest?.address === w.address;
+                return (
+                  <button
+                    key={w.address}
+                    onClick={() => setCleanDest(w)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-sm border text-left transition-colors ${
+                      selected
+                        ? "border-punk-purple bg-punk-purple/10"
+                        : "border-card-border bg-input-bg hover:border-muted"
+                    }`}
+                  >
+                    <PunkAvatar address={w.address} size={32} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium truncate">
+                        {w.username}
+                      </span>
+                      <span className="block font-mono text-xs text-muted">
+                        {formatAddress(w.address)}
+                      </span>
+                    </span>
+                    {selected && (
+                      <svg
+                        className="w-4 h-4 shrink-0 text-punk-purple"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2.5}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           )}
           <button
             onClick={onCreateClean}
