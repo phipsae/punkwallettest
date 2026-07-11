@@ -24,11 +24,16 @@
     "@simplewebauthn/browser": "^13.2.2",
     "@walletconnect/core": "^2.23.0",
     "html5-qrcode": "^2.3.8",
-    "next": "16.0.8",
+    "next": "^16.2.10",
     "qrcode.react": "^4.2.0",
-    "react": "19.2.1",
-    "react-dom": "19.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "viem": "^2.41.2"
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+    "underscore": "^1.13.8",
+    "postcss": "^8.5.10"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -36,7 +41,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.0.8",
+    "eslint-config-next": "^16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
