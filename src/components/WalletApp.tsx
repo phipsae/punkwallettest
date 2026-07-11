@@ -52,12 +52,10 @@ import {
   getCachedENSAvatar,
   getENSAvatarForDisplay,
   getAllNetworks,
-  getCustomNetworks,
   addCustomNetwork,
   removeCustomNetwork,
   getNetworkInfo,
   getAllNetworkIds,
-  type CustomNetwork,
 } from "@/lib/wallet";
 import {
   getAllTokenBalances,
@@ -80,13 +78,11 @@ import {
   rejectSessionRequest,
   formatRequestDisplay,
   updateSessionsAccount,
-  isWalletConnectAvailable,
   type SessionProposal,
   type SessionRequest,
   type ActiveSession,
 } from "@/lib/walletconnect";
 import {
-  getETHPrice,
   formatUSD,
   calculateUSDValue,
   getNativeTokenPrice,
@@ -287,17 +283,25 @@ export default function WalletApp() {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     let removeAppListener: (() => void) | undefined;
+    let cleanedUp = false;
     if (Capacitor.isNativePlatform()) {
       import("@capacitor/app").then(({ App }) => {
         App.addListener("appStateChange", ({ isActive }) => {
           if (!isActive) wipeTransientSecrets();
         }).then((handle) => {
-          removeAppListener = () => handle.remove();
+          // The effect may have been cleaned up while the import/registration
+          // was in flight; drop the listener instead of leaking it
+          if (cleanedUp) {
+            handle.remove();
+          } else {
+            removeAppListener = () => handle.remove();
+          }
         });
       });
     }
 
     return () => {
+      cleanedUp = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       removeAppListener?.();
     };
@@ -331,10 +335,13 @@ export default function WalletApp() {
     };
   }, [wallet, lockWallet]);
 
-  // Fetch balances for all stored wallets
+  // Fetch balances for all stored wallets. Epoch guard as for fetchBalance:
+  // a slow response for the previous network must not overwrite fresh data.
+  const walletBalancesEpoch = useRef(0);
   const fetchWalletBalances = useCallback(
     async (wallets: StoredWallet[]) => {
       if (wallets.length === 0) return;
+      const epoch = ++walletBalancesEpoch.current;
       setLoadingBalances(true);
       const balances: Record<string, string> = {};
 
@@ -352,8 +359,10 @@ export default function WalletApp() {
         })
       );
 
-      setWalletBalances(balances);
-      setLoadingBalances(false);
+      if (epoch === walletBalancesEpoch.current) {
+        setWalletBalances(balances);
+        setLoadingBalances(false);
+      }
     },
     [network]
   );
@@ -461,12 +470,16 @@ export default function WalletApp() {
     previousWalletAddress.current = currentAddress;
   }, [wallet, wcInitialized, wcUnavailable]);
 
-  // Fetch balance when wallet changes
+  // Fetch balance when wallet changes. The epoch guard drops responses that
+  // arrive after a wallet/network switch, so a slow RPC from the previous
+  // chain can't clobber the fresh balances.
+  const balanceFetchEpoch = useRef(0);
   const fetchBalance = useCallback(async () => {
     if (!wallet) return;
+    const epoch = balanceFetchEpoch.current;
     try {
       const result = await getBalance(wallet.address, network);
-      setBalance(result.formatted);
+      if (epoch === balanceFetchEpoch.current) setBalance(result.formatted);
     } catch (err) {
       console.error("Failed to fetch balance:", err);
     }
@@ -475,10 +488,11 @@ export default function WalletApp() {
   // Fetch token balances
   const fetchTokenBalances = useCallback(async () => {
     if (!wallet) return;
+    const epoch = balanceFetchEpoch.current;
     setLoadingTokens(true);
     try {
       const balances = await getAllTokenBalances(wallet.address, network);
-      setTokenBalances(balances);
+      if (epoch === balanceFetchEpoch.current) setTokenBalances(balances);
     } catch (err) {
       console.error("Failed to fetch token balances:", err);
     } finally {
@@ -487,6 +501,7 @@ export default function WalletApp() {
   }, [wallet, network]);
 
   useEffect(() => {
+    balanceFetchEpoch.current++;
     if (wallet) {
       fetchBalance();
       fetchTokenBalances();
@@ -497,6 +512,13 @@ export default function WalletApp() {
       return () => clearInterval(interval);
     }
   }, [wallet, network, fetchBalance, fetchTokenBalances]);
+
+  // A token object belongs to one chain, so clear the send form on switch
+  useEffect(() => {
+    setSelectedToken(null);
+    setSendAmount("");
+    setSendAmountUSD("");
+  }, [network]);
 
   // Auto-dismiss errors after 5 seconds
   useEffect(() => {
@@ -604,6 +626,9 @@ export default function WalletApp() {
     };
 
     fetchEnsData();
+    // Only wallet.address is read; keying on the full wallet object would
+    // refetch ENS on unrelated identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet?.address]);
 
   // Leaving the export view (or locking) must wipe the transiently revealed
@@ -1189,7 +1214,7 @@ export default function WalletApp() {
           // Convert from raw amount to human readable using token decimals
           const decimals = token.token.decimals;
           const amountBigInt = BigInt(amount);
-          const divisor = BigInt(10 ** decimals);
+          const divisor = BigInt(10) ** BigInt(decimals);
           const wholePart = amountBigInt / divisor;
           const fractionalPart = amountBigInt % divisor;
           const fractionalStr = fractionalPart
@@ -1202,11 +1227,13 @@ export default function WalletApp() {
           setSendAmount(humanAmount || "0");
         }
       } else {
-        // Token not in our list, just set the amount as ETH
+        // Unknown token: the raw base-unit amount can't be interpreted
+        // without its decimals, so don't prefill anything
         setSelectedToken(null);
-        if (amount) {
-          setSendAmount(amount);
-        }
+        setSendAmount("");
+        setError(
+          "The requested token isn't in your token list. Add it first, then enter the amount manually."
+        );
       }
     } else {
       setSelectedToken(null);
@@ -2829,20 +2856,18 @@ export default function WalletApp() {
                               (tb) => tb.token.address === selectedToken.address
                             );
                             if (tokenBal) setSendAmount(tokenBal.balance);
-                          } else if (isUSDMode && nativeTokenPrice > 0) {
-                            const maxUSD =
-                              parseFloat(balance) * nativeTokenPrice;
-                            setSendAmountUSD(maxUSD.toFixed(2));
-                            setSendAmount(balance);
-                          } else {
-                            setSendAmount(balance);
-                            if (nativeTokenPrice > 0) {
-                              setSendAmountUSD(
-                                (
-                                  parseFloat(balance) * nativeTokenPrice
-                                ).toFixed(2)
-                              );
-                            }
+                            return;
+                          }
+                          // Reserve a little native balance for gas
+                          const maxNative = Math.max(
+                            0,
+                            parseFloat(balance) - 0.001
+                          );
+                          setSendAmount(maxNative.toString());
+                          if (nativeTokenPrice > 0) {
+                            setSendAmountUSD(
+                              (maxNative * nativeTokenPrice).toFixed(2)
+                            );
                           }
                         }}
                         className="text-sm text-accent hover:text-accent-light font-medium"
@@ -2881,7 +2906,8 @@ export default function WalletApp() {
                         <span className="text-accent">
                           {isUSDMode ? (
                             <>
-                              Sending: {parseFloat(sendAmount).toFixed(6)} ETH
+                              Sending: {parseFloat(sendAmount).toFixed(6)}{" "}
+                              {getNativeTokenSymbol(network)}
                             </>
                           ) : (
                             <>
@@ -5012,9 +5038,4 @@ export default function WalletApp() {
     </div>
   );
 
-  // Helper function for MAX button
-  function setAmount(value: string) {
-    const maxAmount = Math.max(0, parseFloat(value) - 0.001); // Leave some for gas
-    setSendAmount(maxAmount > 0 ? maxAmount.toString() : "0");
-  }
 }
