@@ -36,6 +36,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  // Static export bakes absolute og/twitter image URLs at build time; without
+  // this they point at http://localhost:3000
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://punkwallet.vercel.app"
+  ),
   title: "Punk Wallet | Passkey-Secured Ethereum Wallet",
   description:
     "A self-custodial Ethereum wallet secured by passkeys. No seed phrases, just Face ID or Touch ID.",
