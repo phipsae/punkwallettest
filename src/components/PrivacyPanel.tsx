@@ -766,7 +766,7 @@ export default function PrivacyPanel({
 
       <div className="text-center py-2">
         <div className="text-3xl font-bold tabular-nums">
-          {formatUnits(totalSpendable, 18)}
+          {Number(formatUnits(totalSpendable, 18)).toFixed(6)}
         </div>
         <div className="text-sm text-muted">ETH equivalent, spendable</div>
       </div>
@@ -852,11 +852,11 @@ export default function PrivacyPanel({
               </div>
               <div className="text-right">
                 <div className="font-semibold tabular-nums text-sm">
-                  {formatUnits(row.spendable, row.decimals)}
+                  {Number(formatUnits(row.spendable, row.decimals)).toFixed(6)}
                 </div>
                 {row.pending > BigInt(0) && (
                   <div className="text-[11px] text-punk-yellow">
-                    +{formatUnits(row.pending, row.decimals)}{" "}
+                    +{Number(formatUnits(row.pending, row.decimals)).toFixed(6)}{" "}
                     {row.pendingLabel ?? "pending"}
                   </div>
                 )}

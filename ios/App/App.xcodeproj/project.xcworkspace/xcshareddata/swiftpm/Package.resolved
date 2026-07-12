@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ionic-team/capacitor-swift-pm.git",
       "state" : {
-        "revision" : "596259033e94829dffc552a40e7129262122995e",
-        "version" : "8.0.0"
+        "revision" : "2231987d85b8b0b289320b1d0947b4ae8345cde4",
+        "version" : "8.4.1"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/OutSystems/OSBarcodeLib-iOS.git",
       "state" : {
-        "revision" : "fa51b49cf43ee227b02b371db83c8cb2e2cf8b55",
-        "version" : "2.1.0"
+        "revision" : "392ab180af4f546001dc628a86bb6de4a5b9a2a0",
+        "version" : "2.2.0"
       }
     }
   ],
