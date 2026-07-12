@@ -121,6 +121,25 @@ export default function PrivacyPanel({
       cancelled = true;
     };
   }, [panelView]);
+  // Keep the private-send selection pinned to a real, current shielded row.
+  // The launch button can open this view before balances finish loading (or
+  // holding a stale row object), which leaves activeRow null while the
+  // single-option dropdown still shows an asset, so Send hits the "requires a
+  // shielded balance" guard.
+  useEffect(() => {
+    if (panelView !== "privateSend") return;
+    const rows = balances.filter(
+      (r) => r.protocol === "railgun" && r.spendable > BigInt(0)
+    );
+    if (rows.length === 0) return;
+    const stillValid =
+      activeRow &&
+      rows.some(
+        (r) =>
+          r.protocol === activeRow.protocol && r.contract === activeRow.contract
+      );
+    if (!stillValid) setActiveRow(rows[0]);
+  }, [panelView, balances, activeRow]);
   const [verifiedStatus, setVerifiedStatusState] = useState<VerifiedStatus>(
     getVerifiedStatus()
   );
@@ -650,9 +669,24 @@ export default function PrivacyPanel({
               type="text"
               value={sendTo0zk}
               onChange={(e) => setSendTo0zk(e.target.value)}
-              placeholder="Recipient 0zk address"
-              className="w-full p-3 rounded-sm bg-input-bg border border-card-border font-mono text-sm"
+              placeholder="Recipient 0zk address (0zk1…)"
+              className={`w-full p-3 rounded-sm bg-input-bg border font-mono text-sm ${
+                sendTo0zk.trim() && !sendTo0zk.trim().startsWith("0zk")
+                  ? "border-red-500"
+                  : "border-card-border"
+              }`}
             />
+            {sendTo0zk.trim() && !sendTo0zk.trim().startsWith("0zk") ? (
+              <p className="text-[11px] text-red-400">
+                Private send needs a Railgun 0zk address, not a public 0x one.
+                To send to a public address, use Unshield instead.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted">
+                Must be a Railgun 0zk address. The recipient receives a private
+                balance, funds stay inside the shield.
+              </p>
+            )}
             <input
               type="text"
               inputMode="decimal"
@@ -667,7 +701,11 @@ export default function PrivacyPanel({
             </p>
             <button
               onClick={handlePrivateSend}
-              disabled={busy || !sendAmount || !sendTo0zk}
+              disabled={
+                busy ||
+                !sendAmount ||
+                !sendTo0zk.trim().startsWith("0zk")
+              }
               className="w-full py-3 rounded-sm bg-punk-purple text-white font-medium disabled:opacity-50"
             >
               {busy ? "Sending…" : "Send privately"}
@@ -732,6 +770,12 @@ export default function PrivacyPanel({
         </div>
         <div className="text-sm text-muted">ETH equivalent, spendable</div>
       </div>
+
+      <p className="text-[11px] text-muted text-center -mt-2">
+        Shared across every account under this passkey (the master and its clean
+        accounts), they all have the same private balance and 0zk address. A
+        separately created PunkWallet account has its own.
+      </p>
 
       <div className="grid grid-cols-2 gap-3">
         <button

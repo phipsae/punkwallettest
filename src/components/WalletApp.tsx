@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import { QRCodeSVG } from "qrcode.react";
 import { Capacitor } from "@capacitor/core";
@@ -112,6 +112,30 @@ type View =
   | "tokens"
   | "export";
 
+// Accounts under one passkey (the master at index 0 plus its derived "clean"
+// accounts) share a single Railgun private balance and 0zk receive address.
+// A separately created/recovered PunkWallet is its own passkey, so its own
+// private account. This labels an account's place in that family for the UI.
+function describeAccountFamily(
+  w: StoredWallet,
+  all: StoredWallet[]
+): { badge: string; note: string } {
+  if (w.isImported) {
+    return { badge: "Imported", note: "Separate private account" };
+  }
+  const idx = w.index ?? 0;
+  if (idx === 0) {
+    return { badge: "Master", note: "Shares one private balance with its clean accounts" };
+  }
+  const master = all.find(
+    (x) => x.credentialId === w.credentialId && (x.index ?? 0) === 0 && !x.isImported
+  );
+  return {
+    badge: "Clean account",
+    note: `Part of ${master?.username || "the master account"} · same private balance`,
+  };
+}
+
 export default function WalletApp() {
   const [view, setView] = useState<View>("onboarding");
   const [wallet, setWallet] = useState<PublicWalletInfo | null>(null);
@@ -217,8 +241,9 @@ export default function WalletApp() {
   const [customNetworkExplorer, setCustomNetworkExplorer] = useState("");
   const [addingNetwork, setAddingNetwork] = useState(false);
   const [networkIds, setNetworkIds] = useState<string[]>(Object.keys(NETWORKS));
+  // Address of the account currently being unlocked/switched to (null = none).
   const [switchingWalletIndex, setSwitchingWalletIndex] = useState<
-    number | null
+    string | null
   >(null);
 
   // Import wallet state
@@ -1101,6 +1126,192 @@ export default function WalletApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Group stored accounts by passkey identity for the switcher. A master
+  // (index 0, non-imported) heads each group and its derived clean accounts
+  // nest under it, since they share one private balance. Imported keys stand
+  // alone. The active account's family sorts first.
+  type AccountFamily = {
+    key: string;
+    master: StoredWallet;
+    cleans: StoredWallet[];
+  };
+  const accountFamilies = useMemo<AccountFamily[]>(() => {
+    const byCred = new Map<string, AccountFamily>();
+    const singles: AccountFamily[] = [];
+    for (const w of storedWallets) {
+      if (w.isImported) {
+        singles.push({ key: `imp:${w.address}`, master: w, cleans: [] });
+        continue;
+      }
+      let fam = byCred.get(w.credentialId);
+      if (!fam) {
+        fam = { key: `cred:${w.credentialId}`, master: w, cleans: [] };
+        byCred.set(w.credentialId, fam);
+      }
+      if ((w.index ?? 0) === 0) fam.master = w;
+      else fam.cleans.push(w);
+    }
+    const families = [...byCred.values(), ...singles];
+    for (const f of families) {
+      f.cleans.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    }
+    const activeCred = wallet?.credentialId;
+    families.sort(
+      (a, b) =>
+        (a.master.credentialId === activeCred ? 0 : 1) -
+        (b.master.credentialId === activeCred ? 0 : 1)
+    );
+    return families;
+  }, [storedWallets, wallet?.credentialId]);
+
+  const renderAccountRow = (
+    w: StoredWallet,
+    { indented }: { indented: boolean }
+  ) => {
+    const isCurrent = wallet?.address === w.address;
+    const fam = describeAccountFamily(w, storedWallets);
+    const ensData = getENSAvatarForDisplay(w.address);
+    const switching = switchingWalletIndex === w.address;
+    return (
+      <div
+        key={`${w.credentialId}:${w.index ?? 0}:${w.address}`}
+        className={`p-4 rounded-sm border transition-colors ${
+          isCurrent
+            ? "bg-accent/10 border-accent"
+            : "bg-input-bg border-card-border hover:border-muted"
+        } ${indented ? "ml-6" : ""}`}
+      >
+        <div className="flex items-center gap-3">
+          <button
+            onClick={async () => {
+              if (isCurrent) return;
+              setSwitchingWalletIndex(w.address);
+              setError(null);
+              try {
+                const walletData = await unlockIdentityFor(w);
+                if (walletData) {
+                  setWallet(walletData);
+                  setShowAccountSwitcher(false);
+                  setSuccess(`Switched to ${w.username}`);
+                  setTimeout(() => setSuccess(null), 2000);
+                }
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Failed to unlock wallet"
+                );
+              } finally {
+                setSwitchingWalletIndex(null);
+              }
+            }}
+            disabled={isCurrent || switchingWalletIndex !== null}
+            className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:opacity-100 disabled:cursor-default"
+          >
+            {ensData.enabled && ensData.url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={ensData.url}
+                alt="ENS Avatar"
+                className={`${indented ? "w-9 h-9" : "w-12 h-12"} rounded-sm object-cover`}
+              />
+            ) : (
+              <PunkAvatar address={w.address} size={indented ? 36 : 48} />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-medium truncate">{w.username}</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-sm text-[10px] font-bold tracking-wide shrink-0 ${
+                    fam.badge === "Master"
+                      ? "bg-punk-purple/20 text-punk-purple"
+                      : "bg-card-border text-muted"
+                  }`}
+                >
+                  {fam.badge}
+                </span>
+              </div>
+              <div className="font-mono text-sm text-muted">
+                {formatAddress(w.address)}
+              </div>
+              <div className="text-[11px] text-muted mt-0.5 truncate">
+                {fam.note}
+              </div>
+            </div>
+          </button>
+          <div className="text-right">
+            {loadingBalances ? (
+              <div className="text-sm text-muted">...</div>
+            ) : (
+              <>
+                <div className="font-semibold tabular-nums text-sm">
+                  {parseFloat(walletBalances[w.address] || "0").toFixed(4)}
+                </div>
+                <div className="text-xs text-muted">
+                  {getNativeTokenSymbol(network)}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(w.address);
+              setSuccess("Address copied!");
+              setTimeout(() => setSuccess(null), 2000);
+            }}
+            className="p-2 rounded-sm hover:bg-card-border transition-colors"
+            title="Copy address"
+          >
+            <svg
+              className="w-4 h-4 text-muted"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
+          </button>
+          {isCurrent ? (
+            <svg
+              className="w-5 h-5 text-accent shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+          ) : switching ? (
+            <svg className="w-5 h-5 animate-spin text-accent shrink-0" viewBox="0 0 24 24">
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+                fill="none"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+          ) : null}
+        </div>
+      </div>
+    );
   };
 
   // Import wallet from private key
@@ -4578,56 +4789,58 @@ export default function WalletApp() {
                 </button>
               </div>
 
-              {/* Current Account */}
-              <div className="mb-4">
-                <p className="text-xs text-muted mb-2 uppercase tracking-wider">
-                  Current Account
-                </p>
-                <div className="p-4 rounded-sm bg-accent/10 border border-accent">
-                  <div className="flex items-center gap-3">
-                    {useEnsAvatar && ensAvatarUrl ? (
-                      <img
-                        src={ensAvatarUrl}
-                        alt="ENS Avatar"
-                        className="w-12 h-12 rounded-sm object-cover"
-                      />
-                    ) : (
-                      <PunkAvatar address={wallet.address} size={48} />
+              {/* Accounts, grouped by passkey identity. Each master (index 0)
+                  heads a group and its derived clean accounts nest under it,
+                  since they all share one private (Railgun) balance. Imported
+                  keys and separately created passkeys are their own groups. */}
+              <div className="mb-4 space-y-4 max-h-[26rem] overflow-y-auto">
+                {accountFamilies.map((family) => (
+                  <div key={family.key} className="space-y-2">
+                    {renderAccountRow(family.master, { indented: false })}
+                    {family.cleans.map((c) =>
+                      renderAccountRow(c, { indented: true })
                     )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">
-                        {wallet.username || "Wallet"}
-                      </div>
-                      <div className="font-mono text-sm text-muted">
-                        {formatAddress(wallet.address)}
-                      </div>
-                    </div>
+                    {family.master && !family.master.isImported &&
+                      family.cleans.length === 0 && (
+                        <p className="text-[11px] text-muted pl-14">
+                          No clean accounts yet.
+                        </p>
+                      )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-2 pt-4 border-t border-card-border">
+                {wallet && !wallet.isImported && (
+                  <div>
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(wallet.address);
-                        setSuccess("Address copied!");
-                        setTimeout(() => setSuccess(null), 2000);
+                      onClick={() => {
+                        setShowAccountSwitcher(false);
+                        handleCreateCleanAccount();
                       }}
-                      className="p-2 rounded-sm hover:bg-card-border transition-colors"
-                      title="Copy address"
+                      disabled={loading}
+                      className="w-full p-4 rounded-sm bg-punk-purple/15 border border-punk-purple/40 text-punk-purple hover:bg-punk-purple/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                     >
-                      <svg
-                        className="w-4 h-4 text-muted"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        />
-                      </svg>
+                      <span>🛡</span>
+                      Create clean account
                     </button>
+                    <p className="text-[11px] text-muted mt-1.5 px-1">
+                      A new public address under this master account. It shares
+                      the same private (Railgun) balance and receive address.
+                    </p>
+                  </div>
+                )}
+                <div>
+                  <button
+                    onClick={() => {
+                      setShowAccountSwitcher(false);
+                      handleReset();
+                    }}
+                    className="w-full p-4 rounded-sm bg-card-border hover:bg-muted/20 transition-colors flex items-center justify-center gap-2"
+                  >
                     <svg
-                      className="w-5 h-5 text-accent"
+                      className="w-5 h-5"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -4636,184 +4849,16 @@ export default function WalletApp() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M5 13l4 4L19 7"
+                        d="M12 6v6m0 0v6m0-6h6m-6 0H6"
                       />
                     </svg>
-                  </div>
-                </div>
-              </div>
-
-              {/* Other Accounts */}
-              {storedWallets.filter((w) => w.address !== wallet.address)
-                .length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs text-muted mb-2 uppercase tracking-wider">
-                    Other Accounts
-                  </p>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {storedWallets
-                      .filter((w) => w.address !== wallet.address)
-                      .map((w, i) => {
-                        const ensData = getENSAvatarForDisplay(w.address);
-                        return (
-                          <div
-                            key={`${w.credentialId}:${w.index ?? 0}`}
-                            className="p-4 rounded-sm bg-input-bg border border-card-border hover:border-muted transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <button
-                                onClick={async () => {
-                                  setSwitchingWalletIndex(i);
-                                  setError(null);
-                                  try {
-                                    const walletData =
-                                      await unlockIdentityFor(w);
-                                    if (walletData) {
-                                      setWallet(walletData);
-                                      setShowAccountSwitcher(false);
-                                      setSuccess(`Switched to ${w.username}`);
-                                      setTimeout(() => setSuccess(null), 2000);
-                                    }
-                                    // If walletData is null, user cancelled - do nothing
-                                  } catch (err) {
-                                    // Cancels return null, so anything thrown
-                                    // is a real failure
-                                    setError(
-                                      err instanceof Error
-                                        ? err.message
-                                        : "Failed to unlock wallet"
-                                    );
-                                  } finally {
-                                    setSwitchingWalletIndex(null);
-                                  }
-                                }}
-                                disabled={switchingWalletIndex !== null}
-                                className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:opacity-50"
-                              >
-                                {ensData.enabled && ensData.url ? (
-                                  <img
-                                    src={ensData.url}
-                                    alt="ENS Avatar"
-                                    className="w-12 h-12 rounded-sm object-cover"
-                                  />
-                                ) : (
-                                  <PunkAvatar address={w.address} size={48} />
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium truncate">
-                                    {w.username}
-                                  </div>
-                                  <div className="font-mono text-sm text-muted">
-                                    {formatAddress(w.address)}
-                                  </div>
-                                </div>
-                              </button>
-                              <div className="text-right">
-                                {loadingBalances ? (
-                                  <div className="text-sm text-muted">...</div>
-                                ) : (
-                                  <>
-                                    <div className="font-semibold tabular-nums text-sm">
-                                      {parseFloat(
-                                        walletBalances[w.address] || "0"
-                                      ).toFixed(4)}
-                                    </div>
-                                    <div className="text-xs text-muted">
-                                      {getNativeTokenSymbol(network)}
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigator.clipboard.writeText(w.address);
-                                  setSuccess("Address copied!");
-                                  setTimeout(() => setSuccess(null), 2000);
-                                }}
-                                className="p-2 rounded-sm hover:bg-card-border transition-colors"
-                                title="Copy address"
-                              >
-                                <svg
-                                  className="w-4 h-4 text-muted"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                  />
-                                </svg>
-                              </button>
-                              {switchingWalletIndex === i && (
-                                <svg
-                                  className="w-5 h-5 animate-spin text-accent"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
-                                    fill="none"
-                                  />
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                  />
-                                </svg>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="space-y-2 pt-4 border-t border-card-border">
-                {wallet && !wallet.isImported && (
-                  <button
-                    onClick={() => {
-                      setShowAccountSwitcher(false);
-                      handleCreateCleanAccount();
-                    }}
-                    disabled={loading}
-                    className="w-full p-4 rounded-sm bg-punk-purple/15 border border-punk-purple/40 text-punk-purple hover:bg-punk-purple/25 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <span>🛡</span>
-                    Create clean account
+                    Add or Recover Account
                   </button>
-                )}
-                <button
-                  onClick={() => {
-                    setShowAccountSwitcher(false);
-                    handleReset();
-                  }}
-                  className="w-full p-4 rounded-sm bg-card-border hover:bg-muted/20 transition-colors flex items-center justify-center gap-2"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                    />
-                  </svg>
-                  Add or Recover Account
-                </button>
+                  <p className="text-[11px] text-muted mt-1.5 px-1">
+                    A separate master account with its own passkey, own address,
+                    and its own private balance.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

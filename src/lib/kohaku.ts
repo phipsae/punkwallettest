@@ -910,13 +910,21 @@ async function prepareRailgunPrivateTransferImpl(args: {
 }): Promise<void> {
   const s = requireState();
   if (!s.railgun) throw new Error("Railgun is not available on this network.");
+  // Unlike unshield, the SDK's transfer rejects the native asset outright
+  // (tokenGuard allows erc20 only). Shielded ETH is held as the wrapped base
+  // token, so send that as an ERC-20; the recipient receives shielded WETH,
+  // which their balance view maps back to native ETH.
+  let asset: { __type: "erc20"; contract: `0x${string}` };
   if (args.contract === null) {
-    throw new Error(
-      "Private transfers require an ERC-20 token in this version (not native ETH)."
-    );
+    if (!s.railgunWrappedBase) {
+      throw new Error("Native private send is unavailable on this network.");
+    }
+    asset = { __type: "erc20", contract: s.railgunWrappedBase };
+  } else {
+    asset = { __type: "erc20", contract: args.contract };
   }
   pendingTransferOp = await s.railgun.prepareTransfer(
-    { asset: { __type: "erc20", contract: args.contract }, amount: args.amount },
+    { asset, amount: args.amount },
     args.to0zk as Parameters<typeof s.railgun.prepareTransfer>[1]
   );
 }
